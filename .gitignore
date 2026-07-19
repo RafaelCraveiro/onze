@@ -1,0 +1,9 @@
+# dependências e builds
+node_modules/
+dist/
+
+# base de dados do servidor (muda constantemente — nunca deve ser observada
+# pelo Vite nem pelo scanner do Tailwind)
+server/onze.db
+server/onze.db-wal
+server/onze.db-shm

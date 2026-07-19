@@ -1,0 +1,45 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+}
+
+html, body {
+  margin: 0;
+  background: #eceee4;
+  color: #2f3428;
+  font-family: Verdana, Tahoma, ui-sans-serif, system-ui, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #c3c9b4; border-radius: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* barra verde estilo 11x11 */
+.nav-green {
+  background: linear-gradient(#7cc42d, #4f9312);
+}
+.btn-green {
+  background: linear-gradient(#7cc42d, #55991a);
+  color: #fff;
+  text-shadow: 0 1px 1px rgba(0,0,0,0.25);
+}
+.btn-green:hover { filter: brightness(1.08); }
+.box-cream {
+  background: #f9f7dd;
+  border: 1px solid #e3dfae;
+}
+
+@keyframes onze-pop {
+  0% { transform: scale(0.6); opacity: 0; }
+  70% { transform: scale(1.06); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.onze-pop { animation: onze-pop 0.35s ease-out both; }
+
+@keyframes onze-flash {
+  0%, 100% { background-color: transparent; }
+  40% { background-color: rgba(250, 204, 21, 0.35); }
+}
+.onze-flash { animation: onze-flash 1.2s ease-out; }

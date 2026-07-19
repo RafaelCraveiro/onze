@@ -1,0 +1,20 @@
+# Blueprint do Render — em render.com podes "New +" → "Blueprint" e apontar
+# a este repositório para configurar tudo de uma vez, ou configurar à mão em
+# "New +" → "Web Service" com os mesmos valores (Build/Start Command abaixo).
+#
+# ⚠️ Plano "free": o disco NÃO é persistente — o server/onze.db (contas,
+# dinheiro, plantéis, taças) reinicia sempre que o serviço adormece por
+# inatividade (~15 min) ou é feito um novo deploy. Serve para demonstrar o
+# jogo, não para uma conta a sério. Para persistência real, muda o "plan"
+# para "starter" (ou superior) e adiciona um Disk em Settings → Disks,
+# montado em /opt/render/project/src/server.
+services:
+  - type: web
+    name: onze
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm run server
+    envVars:
+      - key: NODE_VERSION
+        value: 22.12.0
