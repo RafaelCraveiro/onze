@@ -36,7 +36,7 @@ const newGame = () => {
   return {
     club: {
       name: "Teste FC", emblem: EMB, level: 1, xp: 0, totalXp: 0, money: STARTING_MONEY,
-      morale: 70, fans: 100, buildings: { estadio: 1, treino: 1, medico: 1, academia: 1 },
+      morale: 70, fans: 100, buildings: { estadio: 0, treino: 1, medico: 1, academia: 1 },
     },
     players,
     lineup: { formation: "4-4-2", starters: autoPickXI(players, "4-4-2") },

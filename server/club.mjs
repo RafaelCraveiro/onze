@@ -120,7 +120,7 @@ export const initClubForUser = (userId, now = Date.now()) => {
   const players = genInitialSquad(Math.random);
   const starters = autoPickXI(players, "4-4-2");
   db.prepare(`INSERT INTO club (user_id, money, level, xp, total_xp, morale, fans, bld_estadio, bld_treino, bld_medico, bld_academia, train_boost_until, tactic_style, training_focus, formation, starters, next_youth_at, next_aging_at, last_tick, last_hourly)
-    VALUES (?, ?, 1, 0, 0, 70, 100, 1, 1, 1, 1, 0, 'equilibrado', 'misto', '4-4-2', ?, 0, 0, ?, ?)`)
+    VALUES (?, ?, 1, 0, 0, 70, 100, 0, 1, 1, 1, 0, 'equilibrado', 'misto', '4-4-2', ?, 0, 0, ?, ?)`)
     .run(userId, STARTING_MONEY, JSON.stringify(starters), now, now);
   insertPlayers(userId, players);
   db.prepare("INSERT INTO market (user_id, listings, next_drip_at) VALUES (?, '[]', ?)").run(userId, now);
@@ -133,7 +133,7 @@ export const initClubForUser = (userId, now = Date.now()) => {
   const inbox = safeJSON(meta.inbox, []);
   inbox.unshift({
     at: now, type: "welcome", title: "Bem-vindo!",
-    text: "A tua conta está online. As taças do teu nível abrem de 10 em 10 minutos e são partilhadas com outros managers reais — inscreve-te (uma de cada vez!) e aparece à hora dos jogos: tens 4 minutos para registar a equipa, senão perdes 3-0. Os jogadores evoluem com os jogos que fazem. O mercado de transferências abre no nível 3.",
+    text: "A tua conta está online. As taças do teu nível abrem de 10 em 10 minutos e são partilhadas com outros managers reais — inscreve-te (uma de cada vez!) e aparece à hora dos jogos: tens 4 minutos para registar a equipa, senão perdes 3-0. Os jogadores ganham XP a jogar e tu distribui-lo no treino. Tens 3 agentes livres novos por dia desde já; vender jogadores abre no nível 3. O estádio começa com 0 lugares — constrói-o para ganhares bilheteira.",
   });
   db.prepare("UPDATE meta SET inbox = ? WHERE user_id = ?").run(JSON.stringify(inbox), userId);
 };
@@ -210,6 +210,27 @@ export const userInfoFor = (userId, now = Date.now()) => {
 /* ---------- equipa para simular (taças + amigáveis) ---------- */
 export const buildXITeam = (userId, now = Date.now()) => prepareUserTeam(tickClub(userId, now));
 
+/* ---------- perfil PÚBLICO de um manager (visível por qualquer conta) ----------
+   Só informação não sensível: emblema, nível, registo, troféus e plantel
+   (sem preços de venda, dinheiro, XP banked nem inbox). */
+export const publicProfile = (userId) => {
+  if (!hasClub(userId)) return null;
+  const game = loadGame(userId);
+  return {
+    clubName: game.club.name,
+    emblem: game.club.emblem,
+    level: game.club.level,
+    fans: Math.round(game.club.fans ?? 0),
+    record: { wins: game.account.wins, draws: game.account.draws, losses: game.account.losses },
+    trophies: game.account.trophies ?? [],
+    createdAt: game.account.createdAt,
+    squad: game.players.map((p) => ({
+      name: p.name, nat: p.nat, flag: p.flag, pos: p.pos, age: p.age, talent: p.talent, skills: p.skills,
+      fitness: Math.round(p.fitness), morale: Math.round(p.morale ?? 0), stats: p.stats,
+    })),
+  };
+};
+
 /* ---------- aplicar o resultado de um jogo (evolução + XP + dinheiro) ---------- */
 export const applyMatchResult = (userId, { kind, isHome, result, oppName }, now = Date.now()) => {
   const game = tickClub(userId, now);
@@ -231,9 +252,9 @@ export const creditCupOutcome = (userId, { prize, isWinner, cupName, cupLevel, c
 };
 
 /* ---------- ações económicas (todas re-validadas aqui, nunca no cliente) ---------- */
+/* Agentes livres: compráveis desde o NÍVEL 1 (não pertencem a treinadores reais). */
 export const buyListing = (userId, listingId, now = Date.now()) => {
   const game = tickClub(userId, now);
-  if (game.club.level < MARKET_UNLOCK_LEVEL) return { error: "mercado-bloqueado" };
   const listing = game.market.listings.find((l) => l.id === listingId);
   if (!listing) return { error: "listagem-inexistente" };
   const block = canBuy(game, listing);
@@ -241,13 +262,15 @@ export const buyListing = (userId, listingId, now = Date.now()) => {
   game.club.money -= listing.price;
   game.players.push(listing.player);
   game.market.listings = game.market.listings.filter((l) => l.id !== listingId);
-  pushNews(game, "transfer", "Contratação", `${listing.player.name} chegou ao clube por ${listing.price}€ (vendido por ${listing.seller}).`);
+  pushNews(game, "transfer", "Contratação", `${listing.player.name} chegou ao clube como agente livre, por ${listing.price}€.`);
   persistGame(userId, game);
   return { ok: true };
 };
 
+/* Vender no mercado a sério: só a partir do nível MARKET_UNLOCK_LEVEL. */
 export const sellPlayer = (userId, playerId, price, now = Date.now()) => {
   const game = tickClub(userId, now);
+  if (game.club.level < MARKET_UNLOCK_LEVEL) return { error: "mercado-bloqueado" };
   const block = canSell(game);
   if (block) return { error: "nao-permitido", detail: block };
   const p = game.players.find((p) => p.id === playerId);

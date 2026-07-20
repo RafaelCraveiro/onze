@@ -27,32 +27,37 @@ let g = club.loadGame(1);
 check("dinheiro inicial correto", g.club.money === STARTING_MONEY, `(${g.club.money})`);
 check("18 jogadores no plantel inicial", g.players.length === 18, `(${g.players.length})`);
 check("nível 1", g.club.level === 1);
+check("estádio começa no nível 0 (0 lugares)", g.club.buildings.estadio === 0, `(${g.club.buildings.estadio})`);
 check("mercado sem tick ainda não gerou nada", g.market.listings.length === 0);
 
-console.log("\n[2] Mercado: torneira de 3/dia (já corre desde a criação) + bloqueio até ao nível 3");
+console.log("\n[2] Agentes livres: 3/dia desde o NÍVEL 1, compráveis logo; sem dono real");
 g = club.tickClub(1, now); // 1º tick — a torneira dispara logo (pedido pelo Rafael: "existe logo de início")
 check("1º lote de 3 agentes livres chega já no 1º tick", g.market.listings.length === 3, `(${g.market.listings.length})`);
-const buyBlocked = club.buyListing(1, g.market.listings[0].id, now);
-check(`compra bloqueada abaixo do nível ${MARKET_UNLOCK_LEVEL}`, buyBlocked.error === "mercado-bloqueado", JSON.stringify(buyBlocked));
+check("agentes livres não têm vendedor (não pertencem a treinadores reais)", g.market.listings.every((l) => l.seller === undefined));
 
-now += 24 * 60 * 60 * 1000 + 1000; // +1 dia
-g = club.tickClub(1, now);
-check("mais 3 agentes chegam ao fim de 1 dia (6 no total)", g.market.listings.length === 6, `(${g.market.listings.length})`);
-
-console.log("\n[3] Compra/venda só depois do nível 3 (subir XP à força para testar)");
-db.exec(`UPDATE club SET level = 3, xp = 0, total_xp = 903 WHERE user_id = 1`); // 100+300+... até nível 3, valor exato não importa aqui
-g = club.tickClub(1, now);
-check("nível agora é 3", g.club.level === 3);
-// a academia pode ter gerado jovens durante o salto de +1 dia da secção anterior —
-// medimos o crescimento RELATIVO à compra, não um número absoluto fixo.
+// compra PERMITIDA no nível 1 (dinheiro à parte — garantimos fundos para o teste)
+db.prepare("UPDATE club SET money = money + 10000 WHERE user_id = 1").run();
+g = club.loadGame(1);
 const squadBeforeBuy = g.players.length;
 const listing = g.market.listings[0];
 const moneyBefore = g.club.money;
 const buyOk = club.buyListing(1, listing.id, now);
-check("compra aceite no nível 3", buyOk.ok, JSON.stringify(buyOk));
+check("compra de agente livre aceite JÁ no nível 1", buyOk.ok, JSON.stringify(buyOk));
 g = club.loadGame(1);
 check("dinheiro debitado exatamente o preço", g.club.money === moneyBefore - listing.price, `(${g.club.money} vs ${moneyBefore - listing.price})`);
 check("plantel cresceu exatamente +1 com a compra", g.players.length === squadBeforeBuy + 1, `(${squadBeforeBuy} → ${g.players.length})`);
+
+const sellBlocked = club.sellPlayer(1, g.players[0].id, 5000, now);
+check(`venda bloqueada abaixo do nível ${MARKET_UNLOCK_LEVEL}`, sellBlocked.error === "mercado-bloqueado", JSON.stringify(sellBlocked));
+
+now += 24 * 60 * 60 * 1000 + 1000; // +1 dia
+g = club.tickClub(1, now);
+check("mais 3 agentes chegam ao fim de 1 dia", g.market.listings.length === 5, `(${g.market.listings.length})`);
+
+console.log("\n[3] Venda só depois do nível 3 (subir XP à força para testar)");
+db.exec(`UPDATE club SET level = 3, xp = 0, total_xp = 903 WHERE user_id = 1`); // 100+300+... até nível 3, valor exato não importa aqui
+g = club.tickClub(1, now);
+check("nível agora é 3", g.club.level === 3);
 
 const toSell = g.players[0];
 const sellOk = club.sellPlayer(1, toSell.id, 5000, now);

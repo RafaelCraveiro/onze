@@ -20,10 +20,9 @@ export const talentColor = (t) =>
 export const ratingColor = (r) =>
   r >= 8 ? "#3d8c0e" : r >= 7 ? "#71a412" : r >= 6 ? "#c98d09" : "#c0392b";
 
-// escala pensada para a média ponderada por posição (0-25, mesma escala dos
-// atributos individuais — um jogador "20" está muito perto do teto de 25)
+// escala para o Skl = SOMA dos 8 atributos (máx. 8×25=200; plantel inicial ~60-105)
 export const overallColor = (o) =>
-  o >= 20 ? "#b026c9" : o >= 15 ? "#3d8c0e" : o >= 10 ? "#71a412" : o >= 6 ? "#c98d09" : "#8a9077";
+  o >= 150 ? "#b026c9" : o >= 110 ? "#3d8c0e" : o >= 85 ? "#71a412" : o >= 60 ? "#c98d09" : "#8a9077";
 
 // contraste simples entre duas cores hex (para kits não se confundirem)
 export const colorsClash = (a, b) => {

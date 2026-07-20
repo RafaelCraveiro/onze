@@ -2,7 +2,7 @@
 
 import { Section, Btn, Bar, Pill } from "../components/bits.jsx";
 import Emblem from "../components/Emblem.jsx";
-import { BUILDINGS, BOOSTERS, buildingCost, xpForNext, stadiumIncome } from "../../engine/constants.js";
+import { BUILDINGS, BOOSTERS, buildingCost, xpForNext, stadiumCapacity, gateIncome } from "../../engine/constants.js";
 import { fmtMoney, fmtWhen } from "../helpers.js";
 
 export default function ClubView({ game, actions }) {
@@ -48,7 +48,10 @@ export default function ClubView({ game, actions }) {
                 </div>
                 <p className="mt-1 text-xs text-[#6b7261]">{b.desc}</p>
                 {key === "estadio" && (
-                  <p className="mt-0.5 text-[11px] font-semibold text-[#4f7a12]">bilheteira atual: {fmtMoney(stadiumIncome(lvl, club.level))}/jogo em casa</p>
+                  <p className="mt-0.5 text-[11px] font-semibold text-[#4f7a12]">
+                    {stadiumCapacity(lvl).toLocaleString("pt-PT")} lugares · bilheteira: {fmtMoney(gateIncome(lvl, club.fans ?? 0))}/jogo em casa
+                    {stadiumCapacity(lvl) > 0 && (club.fans ?? 0) >= stadiumCapacity(lvl) ? " (casa cheia!)" : ""}
+                  </p>
                 )}
                 <Bar value={lvl} max={b.max} className="mt-2" color="#2563eb" />
               </div>

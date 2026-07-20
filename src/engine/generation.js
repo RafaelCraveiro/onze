@@ -37,13 +37,14 @@ export const randomEmblem = (rng) => ({
 });
 
 /* ---------- Sub-habilidades ----------
-   totalTarget: Skl alvo (soma das 8). Distribui com o mesmo viés de posição
-   usado depois para AVALIAR o jogador (RATING_WEIGHTS, em constants.js),
-   respeitando o teto (SKILL_CAP, hoje plano a 25 para todos). */
-export const genSubskills = (rng, pos, totalTarget, talent) => {
+   totalTarget: Skl alvo (soma das 8). Por omissão distribui com o viés da
+   posição (RATING_WEIGHTS); com random=true a distribuição é totalmente
+   ALEATÓRIA (plantel inicial: os atributos podem calhar bem ou mal — cabe ao
+   treinador corrigi-los com o XP de treino). Teto SKILL_CAP em ambos. */
+export const genSubskills = (rng, pos, totalTarget, talent, { random = false } = {}) => {
   const bias = RATING_WEIGHTS[lineOf(pos)];
   const cap = talentCap(talent);
-  const weights = SKILLS.map((s) => bias[s] * (0.75 + rng() * 0.5));
+  const weights = SKILLS.map((s) => (random ? 0.4 + rng() * 1.6 : bias[s] * (0.75 + rng() * 0.5)));
   const wSum = weights.reduce((a, b) => a + b, 0);
   const skills = {};
   for (let i = 0; i < SKILLS.length; i++) {
@@ -53,7 +54,7 @@ export const genSubskills = (rng, pos, totalTarget, talent) => {
 };
 
 /* ---------- Jogadores ---------- */
-export const genPlayer = (rng, pos, { talentWeights = INITIAL_TALENT_WEIGHTS, skillLevel = 80, ageMin = 18, ageMax = 35 } = {}) => {
+export const genPlayer = (rng, pos, { talentWeights = INITIAL_TALENT_WEIGHTS, skillLevel = 80, ageMin = 18, ageMax = 35, randomSkills = false } = {}) => {
   const talent = weightedPick(rng, talentWeights);
   const age = ageMin + Math.floor(rng() * (ageMax - ageMin + 1));
   const total = Math.max(45, Math.round(skillLevel + (rng() - 0.5) * 40));
@@ -61,16 +62,18 @@ export const genPlayer = (rng, pos, { talentWeights = INITIAL_TALENT_WEIGHTS, sk
   return {
     id: newId(), name: id.name, nat: id.nat, flag: id.flag,
     pos, age, talent,
-    skills: genSubskills(rng, pos, total, talent),
+    skills: genSubskills(rng, pos, total, talent, { random: randomSkills }),
     fitness: 100, morale: 0, injuryMin: 0, suspension: 0,
     stats: { games: 0, goals: 0, assists: 0 },
   };
 };
 
-/* Plantel inicial: 18 jogadores (3 Gk), Skl ~60–106 como no 11x11, sorte ocasional de um talento 7. */
+/* Plantel inicial: 18 jogadores (3 Gk), Skl ~60–106 como no 11x11, sorte
+   ocasional de um talento 7. Atributos SEM viés de posição — tudo aleatório
+   dentro do normal; distribuí-los bem é trabalho do treinador. */
 export const genInitialSquad = (rng) => {
   const plan = ["Gk", "Gk", "Gk", "Ld", "Cd", "Cd", "Rd", "Lm", "Cm", "Cm", "Rm", "Lf", "Cf", "Cf", "Rf", "Cd", "Cm", "Cf"];
-  return plan.map((pos) => genPlayer(rng, pos, { skillLevel: 82 }));
+  return plan.map((pos) => genPlayer(rng, pos, { skillLevel: 82, randomSkills: true }));
 };
 
 export const genYouth = (rng, academyLvl) =>

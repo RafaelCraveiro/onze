@@ -46,16 +46,18 @@ export const RATING_WEIGHTS = {
   AV: { potencia: 1.5, precisao: 1.5, drible: 1.2, controlo: 1.1, passe: 0.8, resistencia: 0.9, desarme: 0.5, marcacao: 0.5 },
 };
 
-// "Overall" de um jogador num slot: MÉDIA PONDERADA dos atributos relevantes
-// para essa posição (não a soma total) — na mesma escala 0-25 dos atributos,
-// depois penalizada se for fora da posição natural do jogador.
+// Overall MOSTRADO = a SOMA dos 8 atributos (estilo 11x11, máx. 8×25=200).
+// A avaliação num slot mantém os pesos por posição (atributos relevantes
+// contam mais), mas reprojetada nessa mesma escala de soma, para que um
+// avançado com remate alto valha mais NUM slot de avançado — sem mudar a
+// escala que o jogador vê.
+export const overallBase = (p) => totalSkill(p);
 export const overallAt = (p, pos) => {
   const w = RATING_WEIGHTS[lineOf(pos)];
   let sw = 0, sv = 0;
   for (const k of SKILLS) { sw += w[k]; sv += w[k] * (p.skills[k] ?? 0); }
-  return Math.round((sv / sw) * posPenalty(p.pos, pos));
+  return Math.round((sv / sw) * SKILLS.length * posPenalty(p.pos, pos));
 };
-export const overallBase = (p) => overallAt(p, p.pos);
 
 /* ---------- Formações: slots [pos, avanço, largura] em coords normalizadas ---------- */
 export const FORMATIONS = {
@@ -139,8 +141,8 @@ export const CUP_SIZE = 8;                       // 8 managers → Quartos, Meia
 export const CUP_EVERY_MS = 10 * 60 * 1000;      // abre uma taça nova a cada 10 minutos
 export const CUP_ROUND_MS = 5 * 60 * 1000;       // cada ronda joga-se 5 minutos depois da anterior
 export const CUP_UPCOMING = 3;                   // taças futuras visíveis para inscrição
-export const cupEntryFee = (level) => 400 + level * 200;
-export const cupPrize = (level) => Math.round((1200 + level * 700) * (1 + level * 0.08));
+export const cupEntryFee = (level) => 25 + level * 15;
+export const cupPrize = (level) => Math.round((300 + level * 180) * (1 + level * 0.05));
 export const cupRunnerUp = (level) => Math.round(cupPrize(level) * 0.35);
 
 export const CUP_REG_WINDOW_MS = 4 * 60 * 1000;     // 4 minutos para registares a equipa em cada jogo
@@ -157,11 +159,14 @@ export const FITNESS_REGEN_PER_MIN = 0.6;           // recupera de um jogo em ~4
 export const MATCH_XP_BASE = 6;                     // XP base por jogo (antes dos multiplicadores)
 export const MATCH_XP_MULT = { taca: 2, amigavel: 0.6 };
 
-/* ---------- Economia (sem salários: os jogadores têm apenas valor de venda) ---------- */
-export const STARTING_MONEY = 40000;
-export const REWARD_WIN_BASE = 1600;
-export const REWARD_DRAW_BASE = 600;
-export const REWARD_LOSS_BASE = 250;
+/* ---------- Economia (DIFÍCIL: o dinheiro é o bem mais essencial) ----------
+   Sem salários, mas os prémios são magros e a bilheteira vale 1€ por adepto
+   PRESENTE (limitado pela capacidade do estádio, que começa em 0 lugares). */
+export const STARTING_MONEY = 2500;
+export const REWARD_WIN_BASE = 120;
+export const REWARD_DRAW_BASE = 45;
+export const REWARD_LOSS_BASE = 15;
+export const REWARD_WIN_PER_LEVEL = 25;
 export const FRIENDLY_REWARD_MULT = 0.5;
 // Preço estilo 11x11 (skill 76, 35 anos, talento 3 → ~1.5k).
 export const playerValue = (p) => {
@@ -174,28 +179,33 @@ export const FITNESS_MATCH_COST = 22;
 export const fitnessFactor = (f) => 0.68 + 0.32 * Math.min(100, Math.max(0, f)) / 100;
 export const moraleFactor = (m) => 0.92 + 0.16 * Math.min(100, Math.max(0, m)) / 100;
 
-/* ---------- Infraestruturas ---------- */
+/* ---------- Infraestruturas ----------
+   O estádio COMEÇA no nível 0 (0 lugares). Cada nível dá +100 lugares e a
+   bilheteira é 1€ por adepto presente: min(lugares, adeptos) por jogo em casa. */
 export const BUILDINGS = {
-  estadio: { label: "Estádio", desc: "Mais bilheteira nos jogos em casa.", max: 10 },
+  estadio: { label: "Estádio", desc: "+100 lugares por nível — 1€ por adepto presente nos jogos em casa.", max: 10 },
   treino: { label: "Centro de Treino", desc: "Acelera o treino diário dos jogadores.", max: 10 },
   medico: { label: "Dep. Médico", desc: "Menos lesões e recuperação mais rápida.", max: 10 },
   academia: { label: "Academia", desc: "Gera jovens promessas (melhor talento a nível alto).", max: 10 },
 };
-export const buildingCost = (lvl) => Math.round(6000 * Math.pow(1.75, lvl - 1));
-export const stadiumIncome = (lvl, clubLevel) => Math.round((900 + lvl * 650) * (1 + clubLevel * 0.06));
+export const buildingCost = (lvl) => Math.round(500 * Math.pow(1.8, lvl - 1));
+export const STADIUM_SEATS_PER_LEVEL = 100;
+export const stadiumCapacity = (lvl) => lvl * STADIUM_SEATS_PER_LEVEL;
+export const TICKET_PRICE = 1;
+export const gateIncome = (stadiumLvl, fans) => Math.round(Math.min(stadiumCapacity(stadiumLvl), Math.max(0, fans)) * TICKET_PRICE);
 
 /* ---------- Boosters ---------- */
 export const BOOSTERS = {
-  energia: { label: "Energético", desc: "Restaura a energia de todo o plantel.", price: 2500, icon: "⚡" },
-  moral: { label: "Motivador", desc: "+18 de moral imediata.", price: 1800, icon: "🔥" },
-  treino: { label: "Treino Intensivo", desc: "Experiência de jogo a dobrar durante 2 horas.", price: 2200, icon: "🎯" },
+  energia: { label: "Energético", desc: "Restaura a energia de todo o plantel.", price: 400, icon: "⚡" },
+  moral: { label: "Motivador", desc: "+18 de moral imediata.", price: 300, icon: "🔥" },
+  treino: { label: "Treino Intensivo", desc: "Experiência de jogo a dobrar durante 2 horas.", price: 350, icon: "🎯" },
 };
 export const TRAIN_BOOST_MS = 2 * HOUR_MS;
 
 /* ---------- Mundo / mercado ----------
-   O mercado só ABRE (compra/venda) a partir do nível 3, mas a "torneira" de
-   3 agentes livres por dia já corre desde a criação da conta — quando lá
-   chegares, encontras um mercado com progresso acumulado. */
+   AGENTES LIVRES desde o nível 1: cada treinador tem a sua própria torneira
+   de 3 jogadores aleatórios por dia, compráveis logo (não pertencem a
+   treinadores reais). VENDER no mercado só a partir do nível 3. */
 export const SQUAD_CAP = 26;
 export const SQUAD_MIN = 13;
 export const MARKET_UNLOCK_LEVEL = 3;

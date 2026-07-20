@@ -12,6 +12,8 @@ import MarketView from "./ui/views/MarketView.jsx";
 import CompetitionsView from "./ui/views/CompetitionsView.jsx";
 import ClubView from "./ui/views/ClubView.jsx";
 import MatchView from "./ui/views/MatchView.jsx";
+import ManagerProfilePage from "./ui/components/ManagerProfile.jsx";
+import PlayerPage from "./ui/components/PlayerPage.jsx";
 import Emblem from "./ui/components/Emblem.jsx";
 import PreMatchModal from "./ui/components/PreMatchModal.jsx";
 import { Bar, Btn, PosBadge, Talent } from "./ui/components/bits.jsx";
@@ -44,6 +46,8 @@ export default function App() {
   const [tab, setTab] = useState("inicio");
   const [reveal, setReveal] = useState(false);
   const [preMatch, setPreMatch] = useState(null); // {kind, cupId?} — ecrã de envio de equipa
+  const [profileOf, setProfileOf] = useState(null); // nome do clube → PÁGINA de perfil (estilo 11x11)
+  const [playerPage, setPlayerPage] = useState(null); // {playerId} (teu) | {player, owner} (de outro manager / agente livre)
   const now = useClock();
   const prepareMatch = (kind, opts = {}) => setPreMatch({ kind, ...opts });
 
@@ -101,8 +105,8 @@ export default function App() {
         {TABS.map(([k, icon, label]) => (
           <button
             key={k}
-            onClick={() => setTab(k)}
-            className={`flex items-center gap-1.5 whitespace-nowrap px-3.5 py-2 text-sm font-bold text-white transition ${tab === k ? "bg-black/20 shadow-inner" : "hover:bg-white/10"}`}
+            onClick={() => { setProfileOf(null); setPlayerPage(null); setTab(k); }}
+            className={`flex items-center gap-1.5 whitespace-nowrap px-3.5 py-2 text-sm font-bold text-white transition ${tab === k && !profileOf && !playerPage ? "bg-black/20 shadow-inner" : "hover:bg-white/10"}`}
             style={{ textShadow: "0 1px 1px rgba(0,0,0,0.3)" }}
           >
             <span>{icon}</span>{label}
@@ -146,13 +150,32 @@ export default function App() {
         </aside>
 
         <main className="min-w-0">
-          {tab === "inicio" && <HomeView game={game} actions={actions} now={now} onPrepareMatch={prepareMatch} />}
-          {tab === "plantel" && <SquadView game={game} actions={actions} />}
-          {tab === "taticas" && <TacticsView game={game} actions={actions} />}
-          {tab === "treino" && <TrainingView game={game} actions={actions} />}
-          {tab === "mercado" && <MarketView game={game} actions={actions} />}
-          {tab === "competicoes" && <CompetitionsView game={game} actions={actions} now={now} onPrepareMatch={prepareMatch} />}
-          {tab === "clube" && <ClubView game={game} actions={actions} />}
+          {playerPage ? (
+            <PlayerPage
+              game={game}
+              actions={actions}
+              page={playerPage}
+              onBack={() => setPlayerPage(null)}
+              onShowProfile={(name) => { setPlayerPage(null); setProfileOf(name); }}
+              onGoTraining={() => { setPlayerPage(null); setProfileOf(null); setTab("treino"); }}
+            />
+          ) : profileOf ? (
+            <ManagerProfilePage
+              clubName={profileOf}
+              onBack={() => setProfileOf(null)}
+              onShowPlayer={(player) => setPlayerPage({ player, owner: profileOf })}
+            />
+          ) : (
+            <>
+              {tab === "inicio" && <HomeView game={game} actions={actions} now={now} onPrepareMatch={prepareMatch} />}
+              {tab === "plantel" && <SquadView game={game} actions={actions} onShowPlayer={(id) => setPlayerPage({ playerId: id })} />}
+              {tab === "taticas" && <TacticsView game={game} actions={actions} />}
+              {tab === "treino" && <TrainingView game={game} actions={actions} />}
+              {tab === "mercado" && <MarketView game={game} actions={actions} onShowPlayer={(player) => setPlayerPage({ player, owner: null })} />}
+              {tab === "competicoes" && <CompetitionsView game={game} actions={actions} now={now} onPrepareMatch={prepareMatch} onShowProfile={setProfileOf} />}
+              {tab === "clube" && <ClubView game={game} actions={actions} />}
+            </>
+          )}
         </main>
       </div>
 

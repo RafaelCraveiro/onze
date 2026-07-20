@@ -1,14 +1,14 @@
-/* Mercado de transferências — listagens de managers simulados + vendas do utilizador.
-   O mercado só abre (compra/venda) a partir do nível MARKET_UNLOCK_LEVEL, mas a
-   torneira de agentes livres já corre desde a criação da conta: MARKET_DRIP_COUNT
-   jogadores novos por MARKET_DRIP_MS (~3/dia), para haver progresso acumulado
-   quando o jogador finalmente desbloqueia. As listagens expiram ao relógio. */
+/* Agentes livres + vendas do utilizador.
+   AGENTES LIVRES: cada treinador tem a sua própria secção, populada desde o
+   NÍVEL 1 — MARKET_DRIP_COUNT (3) jogadores aleatórios novos por dia, com
+   preço de compra, mas que NÃO pertencem a nenhum treinador real. As
+   listagens expiram ao relógio. Vender jogadores (mercado a sério) continua
+   fechado até MARKET_UNLOCK_LEVEL. */
 
 import {
   playerValue, SQUAD_CAP, SQUAD_MIN, HOUR_MS, MARKET_DRIP_COUNT, MARKET_DRIP_MS,
 } from "./constants.js";
 import { genMarketPlayer } from "./generation.js";
-import { managerName } from "./names.js";
 
 export const refreshMarket = (market, rng, clubLevel, now = Date.now()) => {
   let listings = market.listings.filter((l) => (l.expiresAt ?? 0) > now);
@@ -21,7 +21,6 @@ export const refreshMarket = (market, rng, clubLevel, now = Date.now()) => {
         id: `l${nextDripAt}-${Math.floor(rng() * 1e9).toString(36)}`,
         player,
         price: Math.round((value * (0.9 + rng() * 0.45)) / 50) * 50,
-        seller: managerName(rng),
         expiresAt: nextDripAt + HOUR_MS * (36 + rng() * 36), // 1,5–3 dias de validade
         listedAt: nextDripAt,
       });

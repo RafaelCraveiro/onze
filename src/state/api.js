@@ -34,6 +34,9 @@ export const apiMe = () => call("GET", "/api/me");
 /* ---------- estado (plantel + economia — autoritário no servidor) ---------- */
 export const apiState = () => call("GET", "/api/state");
 
+// perfil público de outro manager (emblema, troféus, plantel) — por nome de clube
+export const apiProfile = (clubName) => call("GET", `/api/profile/${encodeURIComponent(clubName)}`);
+
 export const apiSetLineup = (formation, starters) => call("POST", "/api/lineup", { formation, starters });
 export const apiSetStyle = (style) => call("POST", "/api/tactics", { style });
 
@@ -60,12 +63,13 @@ export const API_ERROR_PT = {
   "sem-ligacao": "Sem ligação ao servidor. O servidor está a correr?",
   "sem-sessao": "Sessão expirada — entra de novo.",
   "sessao-invalida": "Sessão expirada — entra de novo.",
-  "mercado-bloqueado": "O mercado só abre a partir do nível 3.",
+  "mercado-bloqueado": "Vender jogadores só a partir do nível 3.",
   "dinheiro-insuficiente": "Não tens dinheiro suficiente.",
   "nivel-maximo": "Já está no nível máximo.",
   "ja-ativo": "Já está ativo.",
   "atributo-invalido": "Atributo inválido.",
   "teto-atingido": "Este atributo já está no teto (25).",
   "xp-insuficiente": "Não tens XP suficiente para este jogador.",
+  "perfil-inexistente": "Esse manager não existe (ou é um bot).",
 };
 export const errPt = (e) => API_ERROR_PT[e?.message] ?? `Erro inesperado (${e?.message ?? "?"}).`;

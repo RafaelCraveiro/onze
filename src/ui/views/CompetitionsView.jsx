@@ -22,8 +22,9 @@ const teamEmblem = (game, id, cup) => (id === YOU ? game.club.emblem : cup?.info
 const teamLevel = (game, id, cup) => (id === YOU ? game.club.level : cup?.info?.[id]?.level ?? "?");
 const isRealUser = (id, cup) => id !== YOU && !!cup?.info?.[id]?.isUser;
 
-export default function CompetitionsView({ game, actions, now, onPrepareMatch }) {
+export default function CompetitionsView({ game, actions, now, onPrepareMatch, onShowProfile }) {
   const ts = now.getTime();
+  const setProfileOf = onShowProfile; // managers reais abrem uma PÁGINA de perfil (App.jsx)
   const active = userActiveCup(game); // taça em que ainda estás VIVO (bloqueia novas inscrições)
   const mine = game.cups.filter((c) => c.entrants.includes(YOU) && (c.state === "inscricao" || c.state === "decorrer"));
   const open = game.cups.filter((c) => c.state === "inscricao" && !c.entrants.includes(YOU)).sort((a, b) => a.startsAt - b.startsAt);
@@ -33,8 +34,8 @@ export default function CompetitionsView({ game, actions, now, onPrepareMatch })
     <div className="flex flex-col gap-3">
       {mine.map((cup) =>
         cup.state === "inscricao"
-          ? <EnrolledCup key={cup.id} cup={cup} game={game} ts={ts} />
-          : <ActiveCup key={cup.id} cup={cup} game={game} ts={ts} onPrepareMatch={onPrepareMatch} />
+          ? <EnrolledCup key={cup.id} cup={cup} game={game} ts={ts} onShowProfile={setProfileOf} />
+          : <ActiveCup key={cup.id} cup={cup} game={game} ts={ts} onPrepareMatch={onPrepareMatch} onShowProfile={setProfileOf} />
       )}
 
       <Section
@@ -82,18 +83,26 @@ export default function CompetitionsView({ game, actions, now, onPrepareMatch })
           {done.map((cup) => (
             <p key={cup.id} className="border-b border-[#eef0e4] py-1 text-sm last:border-0">
               {cup.icon} <b>{cup.name}</b> — vencedor:{" "}
-              <span className={cup.winner === YOU ? "font-black text-[#d97706]" : "font-semibold"}>{teamName(game, cup.winner, cup)}</span>
+              {isRealUser(cup.winner, cup) ? (
+                <button className="font-semibold text-[#2563eb] underline decoration-dotted" onClick={() => setProfileOf(teamName(game, cup.winner, cup))}>
+                  {teamName(game, cup.winner, cup)}
+                </button>
+              ) : (
+                <span className={cup.winner === YOU ? "font-black text-[#d97706]" : "font-semibold"}>{teamName(game, cup.winner, cup)}</span>
+              )}
               {cup.winner === YOU && " 🏆"}
             </p>
           ))}
         </Section>
       )}
+
     </div>
   );
 }
 
-/* A taça onde estás inscrito, antes do sorteio: lista de inscritos em direto. */
-const EnrolledCup = ({ cup, game, ts }) => (
+/* A taça onde estás inscrito, antes do sorteio: lista de inscritos em direto.
+   Managers REAIS são clicáveis — abrem o perfil público deles. */
+const EnrolledCup = ({ cup, game, ts, onShowProfile }) => (
   <Section
     title={`${cup.icon} ${cup.name} · estás inscrito`}
     right={<Pill>começa às {fmtTime(cup.startsAt)} ({countdown(cup.startsAt - ts)})</Pill>}
@@ -102,15 +111,23 @@ const EnrolledCup = ({ cup, game, ts }) => (
       Managers inscritos ({cup.entrants.length}/{cup.size}) — as vagas restantes são preenchidas no sorteio:
     </p>
     <div className="grid gap-1 sm:grid-cols-2">
-      {cup.entrants.map((id) => (
-        <div key={id} className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-sm ${id === YOU ? "box-cream font-bold" : "bg-[#f7f8f1]"}`}>
-          <Emblem emblem={teamEmblem(game, id, cup)} size={22} />
-          <span className="min-w-0 flex-1 truncate">{teamName(game, id, cup)}</span>
-          {isRealUser(id, cup) && <span className="rounded bg-[#2563eb1a] px-1 text-[9px] font-bold text-[#2563eb]">REAL</span>}
-          <span className="text-[10px] text-[#9aa08e]">nível {teamLevel(game, id, cup)}</span>
-          {id === YOU && <Pill>tu</Pill>}
-        </div>
-      ))}
+      {cup.entrants.map((id) => {
+        const real = isRealUser(id, cup);
+        return (
+          <div
+            key={id}
+            onClick={real ? () => onShowProfile(teamName(game, id, cup)) : undefined}
+            title={real ? "Ver perfil do manager" : undefined}
+            className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-sm ${id === YOU ? "box-cream font-bold" : "bg-[#f7f8f1]"} ${real ? "cursor-pointer hover:bg-[#eef3ff]" : ""}`}
+          >
+            <Emblem emblem={teamEmblem(game, id, cup)} size={22} />
+            <span className="min-w-0 flex-1 truncate">{teamName(game, id, cup)}</span>
+            {real && <span className="rounded bg-[#2563eb1a] px-1 text-[9px] font-bold text-[#2563eb]">REAL</span>}
+            <span className="text-[10px] text-[#9aa08e]">nível {teamLevel(game, id, cup)}</span>
+            {id === YOU && <Pill>tu</Pill>}
+          </div>
+        );
+      })}
     </div>
     <p className="mt-2 text-[11px] font-semibold text-[#a07407]">
       ⚠️ Quando começar tens 4 minutos para registar a equipa em cada ronda — falta de comparência é derrota 3-0!
@@ -120,7 +137,7 @@ const EnrolledCup = ({ cup, game, ts }) => (
 );
 
 /* A taça a decorrer: bracket + janela de registo. */
-const ActiveCup = ({ cup, game, ts, onPrepareMatch }) => {
+const ActiveCup = ({ cup, game, ts, onPrepareMatch, onShowProfile }) => {
   const my = userCupMatch(cup, ts);
   const due = cupRoundDue(cup);
   const regEnd = due + (cup.regWindowMs ?? CUP_REG_WINDOW_MS);
@@ -151,8 +168,8 @@ const ActiveCup = ({ cup, game, ts, onPrepareMatch }) => {
             <div className="flex flex-col gap-1">
               {round.map((m, mi) => (
                 <div key={mi} className={`rounded-md border px-2 py-1 text-xs ${m.h === YOU || m.a === YOU ? "box-cream" : "border-[#e6e8da] bg-white"}`}>
-                  <TieRow game={game} cup={cup} id={m.h} score={m.score?.[0]} winner={m.score && m.score[0] > m.score[1]} />
-                  <TieRow game={game} cup={cup} id={m.a} score={m.score?.[1]} winner={m.score && m.score[1] > m.score[0]} />
+                  <TieRow game={game} cup={cup} id={m.h} score={m.score?.[0]} winner={m.score && m.score[0] > m.score[1]} onShowProfile={onShowProfile} />
+                  <TieRow game={game} cup={cup} id={m.a} score={m.score?.[1]} winner={m.score && m.score[1] > m.score[0]} onShowProfile={onShowProfile} />
                 </div>
               ))}
             </div>
@@ -163,13 +180,20 @@ const ActiveCup = ({ cup, game, ts, onPrepareMatch }) => {
   );
 };
 
-const TieRow = ({ game, cup, id, score, winner }) => (
-  <div className={`flex items-center justify-between ${winner ? "font-bold text-[#2f3428]" : "text-[#6b7261]"}`}>
-    <span className="flex min-w-0 items-center gap-1">
-      <Emblem emblem={teamEmblem(game, id, cup)} size={14} />
-      <span className="max-w-[125px] truncate">{teamName(game, id, cup)}</span>
-      {isRealUser(id, cup) && <span className="text-[8px] font-bold text-[#2563eb]">●</span>}
-    </span>
-    <span className="tabular-nums">{score ?? ""}</span>
-  </div>
-);
+const TieRow = ({ game, cup, id, score, winner, onShowProfile }) => {
+  const real = isRealUser(id, cup);
+  return (
+    <div className={`flex items-center justify-between ${winner ? "font-bold text-[#2f3428]" : "text-[#6b7261]"}`}>
+      <span
+        className={`flex min-w-0 items-center gap-1 ${real ? "cursor-pointer hover:underline" : ""}`}
+        onClick={real ? () => onShowProfile(teamName(game, id, cup)) : undefined}
+        title={real ? "Ver perfil do manager" : undefined}
+      >
+        <Emblem emblem={teamEmblem(game, id, cup)} size={14} />
+        <span className="max-w-[125px] truncate">{teamName(game, id, cup)}</span>
+        {real && <span className="text-[8px] font-bold text-[#2563eb]">●</span>}
+      </span>
+      <span className="tabular-nums">{score ?? ""}</span>
+    </div>
+  );
+};

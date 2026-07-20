@@ -23,6 +23,7 @@ export const db = new DatabaseSync(path.join(__dirname, "onze.db"));
 
 db.exec(`
   PRAGMA journal_mode = WAL;
+  PRAGMA busy_timeout = 5000;
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     email TEXT NOT NULL UNIQUE,
@@ -125,6 +126,14 @@ app.get("/api/me", auth, (req, res) => {
 /* ---------- estado do clube (plantel + economia — sempre a verdade do servidor) ---------- */
 app.get("/api/state", auth, (req, res) => {
   res.json({ game: club.tickClub(req.userId, Date.now()) });
+});
+
+/* ---------- perfil público de outro manager (por nome de clube) ---------- */
+app.get("/api/profile/:club", auth, (req, res) => {
+  const user = db.prepare("SELECT id FROM users WHERE club_name = ? COLLATE NOCASE").get(String(req.params.club ?? ""));
+  const profile = user ? club.publicProfile(user.id) : null;
+  if (!profile) return res.status(404).json({ error: "perfil-inexistente" });
+  res.json({ profile });
 });
 
 app.post("/api/lineup", auth, (req, res) => {

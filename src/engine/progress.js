@@ -6,8 +6,8 @@
 
 import {
   XP_WIN, XP_DRAW, MAX_LEVEL, xpForNext,
-  REWARD_WIN_BASE, REWARD_DRAW_BASE, REWARD_LOSS_BASE, FRIENDLY_REWARD_MULT,
-  FITNESS_MATCH_COST, stadiumIncome, INBOX_CAP, HISTORY_CAP,
+  REWARD_WIN_BASE, REWARD_DRAW_BASE, REWARD_LOSS_BASE, REWARD_WIN_PER_LEVEL, FRIENDLY_REWARD_MULT,
+  FITNESS_MATCH_COST, gateIncome, INBOX_CAP, HISTORY_CAP,
   MATCH_XP_BASE, MATCH_XP_MULT, talentGrowth,
 } from "./constants.js";
 
@@ -55,9 +55,10 @@ export const applyUserResult = (game, { kind, userSide, result, oppName, isHome,
   // Falta de comparência: nem prémio de jogo nem bilheteira.
   let reward = 0, tickets = 0;
   if (!forfeit) {
-    reward = outcome === "V" ? REWARD_WIN_BASE + game.club.level * 220 : outcome === "E" ? REWARD_DRAW_BASE : REWARD_LOSS_BASE;
+    reward = outcome === "V" ? REWARD_WIN_BASE + game.club.level * REWARD_WIN_PER_LEVEL : outcome === "E" ? REWARD_DRAW_BASE : REWARD_LOSS_BASE;
     if (kind === "amigavel") reward = Math.round(reward * FRIENDLY_REWARD_MULT);
-    if (isHome) tickets = Math.round(stadiumIncome(game.club.buildings.estadio, game.club.level) * (kind === "amigavel" ? 0.4 : 1));
+    // bilheteira: 1€ por adepto PRESENTE — limitado pelos lugares do estádio (começa em 0)
+    if (isHome) tickets = Math.round(gateIncome(game.club.buildings.estadio, game.club.fans ?? 0) * (kind === "amigavel" ? 0.5 : 1));
     game.club.money += reward + tickets;
   }
 
