@@ -2,9 +2,9 @@
 
 import {
   INITIAL_TALENT_WEIGHTS, academyTalentWeights, talentCap,
-  WORLD_BOTS, SKILLS, lineOf,
+  RATING_WEIGHTS, SKILLS, lineOf,
 } from "./constants.js";
-import { playerIdentity, clubName, managerName, mulberry32, pickFrom } from "./names.js";
+import { playerIdentity, mulberry32, pickFrom } from "./names.js";
 
 let nextId = 1;
 export const newId = () => `p${Date.now().toString(36)}${(nextId++).toString(36)}`;
@@ -37,16 +37,11 @@ export const randomEmblem = (rng) => ({
 });
 
 /* ---------- Sub-habilidades ----------
-   totalTarget: Skl alvo (soma das 8). Distribui com viés da posição, respeitando o teto do talento. */
-const POS_BIAS = {
-  GR: { desarme: 1.1, marcacao: 1.2, controlo: 1.3, resistencia: 1.2, passe: 0.9, drible: 0.6, potencia: 0.6, precisao: 0.7 },
-  DF: { desarme: 1.5, marcacao: 1.5, resistencia: 1.2, controlo: 0.9, passe: 0.9, drible: 0.7, potencia: 0.7, precisao: 0.6 },
-  MD: { passe: 1.4, controlo: 1.3, drible: 1.1, resistencia: 1.1, desarme: 0.9, marcacao: 0.8, potencia: 0.8, precisao: 0.8 },
-  AV: { potencia: 1.5, precisao: 1.5, drible: 1.2, controlo: 1.1, passe: 0.8, resistencia: 0.9, desarme: 0.5, marcacao: 0.5 },
-};
-
+   totalTarget: Skl alvo (soma das 8). Distribui com o mesmo viés de posição
+   usado depois para AVALIAR o jogador (RATING_WEIGHTS, em constants.js),
+   respeitando o teto (SKILL_CAP, hoje plano a 25 para todos). */
 export const genSubskills = (rng, pos, totalTarget, talent) => {
-  const bias = POS_BIAS[lineOf(pos)];
+  const bias = RATING_WEIGHTS[lineOf(pos)];
   const cap = talentCap(talent);
   const weights = SKILLS.map((s) => bias[s] * (0.75 + rng() * 0.5));
   const wSum = weights.reduce((a, b) => a + b, 0);
@@ -84,27 +79,18 @@ export const genYouth = (rng, academyLvl) =>
     skillLevel: 55 + academyLvl * 3, ageMin: 16, ageMax: 18,
   });
 
-/* ---------- Mundo de managers simulados ---------- */
-export const genWorld = (seed) => {
-  const rng = mulberry32(seed);
-  const bots = [];
-  for (let i = 0; i < WORLD_BOTS; i++) {
-    const r = rng();
-    const level = r < 0.3 ? 1 : r < 0.5 ? 2 : r < 0.65 ? 3 : r < 0.76 ? 4 : r < 0.84 ? 5 : r < 0.9 ? 6 + Math.floor(rng() * 3) : 9 + Math.floor(rng() * 8);
-    bots.push({
-      id: `b${i}`,
-      user: managerName(rng),
-      team: clubName(rng),
-      emblem: randomEmblem(rng),
-      level,
-      xp: Math.floor(rng() * 8),
-      // força ≈ Skl médio do plantel para o nível
-      str: Math.round(72 + level * 4.5 + (rng() - 0.5) * 16),
-      wins: Math.floor(level * (4 + rng() * 6)),
-    });
-  }
-  return { seed, bots };
-};
+/* ---------- Bots ----------
+   Simplificados de propósito: não são "managers" com nome/emblema próprios —
+   são literalmente uma conta do sistema que joga os jogos sem adversário
+   real e fica com o troféu se ganhar a sério. Gerados na hora (sem pool
+   persistente), só precisam de força (derivada do nível) para simular. */
+export const BOT_EMBLEM = { shape: "circulo", pattern: "liso", symbol: "🤖", c1: "#64748b", c2: "#f8fafc" };
+
+export const genBot = (rng, level, label = "") => ({
+  id: `bot-${Math.floor(rng() * 1e9).toString(36)}`,
+  user: "Bot", team: label ? `Bot ${label}` : "Bot", emblem: BOT_EMBLEM,
+  level, str: Math.round(72 + level * 4.5 + (rng() - 0.5) * 16),
+});
 
 /* XI sintético de um bot (determinístico por id+dia). */
 export const botLineup = (bot, day) => {

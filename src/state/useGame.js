@@ -10,7 +10,7 @@ import { autoPickXI } from "../engine/team.js";
 import { buildTimeline } from "../engine/timeline.js";
 import {
   getToken, setToken, apiRegister, apiLogin, apiLogout, apiState,
-  apiSetLineup, apiSetStyle, apiSetTraining,
+  apiSetLineup, apiSetStyle, apiTrain,
   apiBuy, apiSell, apiCancelSale, apiRelease, apiUpgrade, apiBooster, apiFriendly,
   errPt,
 } from "./api.js";
@@ -133,8 +133,6 @@ export const useGame = () => {
       ),
     setStyle: (style) =>
       mutateLocal((g) => { g.tacticStyle = style; }, (g) => apiSetStyle(g.tacticStyle)),
-    setTrainingFocus: (focus) =>
-      mutateLocal((g) => { g.trainingFocus = focus; }, (g) => apiSetTraining(g.trainingFocus)),
     autoXI: () =>
       mutateLocal(
         (g) => { g.lineup.starters = autoPickXI(g.players, g.lineup.formation); },
@@ -215,6 +213,9 @@ export const useGame = () => {
     /* ---------- Clube ---------- */
     upgradeBuilding: (key) => runEconomic(() => apiUpgrade(key)),
     buyBooster: (key) => runEconomic(() => apiBooster(key)),
+
+    /* ---------- Evolução: distribuição manual de XP ---------- */
+    trainSkill: (playerId, skill) => runEconomic(() => apiTrain(playerId, skill)),
 
     dismissNotice: () => setNotice(null),
   };

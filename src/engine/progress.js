@@ -1,21 +1,15 @@
 /* Progressão: XP/nível do clube, aplicação de resultados, EVOLUÇÃO POR JOGO.
-   O jogo é online — não há dias: notícias e histórico usam timestamps reais,
-   e os jogadores evoluem consoante o talento e os jogos que fazem. */
+   O jogo é online — não há dias: notícias e histórico usam timestamps reais.
+   Os jogadores GANHAM XP ao jogar (mais talento = mais XP por jogo) e o
+   treinador distribui manualmente esse XP pelos atributos (ver trainCost em
+   constants.js e trainSkill em server/club.mjs) — não há treino automático. */
 
 import {
   XP_WIN, XP_DRAW, MAX_LEVEL, xpForNext,
   REWARD_WIN_BASE, REWARD_DRAW_BASE, REWARD_LOSS_BASE, FRIENDLY_REWARD_MULT,
-  FITNESS_MATCH_COST, stadiumIncome, INBOX_CAP, HISTORY_CAP, overallBase, fitnessFactor,
-  MATCH_XP_BASE, MATCH_XP_MULT, talentGrowth, talentCap, SKILLS, lineOf,
+  FITNESS_MATCH_COST, stadiumIncome, INBOX_CAP, HISTORY_CAP,
+  MATCH_XP_BASE, MATCH_XP_MULT, talentGrowth,
 } from "./constants.js";
-
-/* Cada foco de treino direciona a experiência de jogo para certas sub-habilidades. */
-export const FOCUS_SKILLS = {
-  ataque: ["potencia", "precisao"],
-  defesa: ["desarme", "marcacao"],
-  tecnica: ["passe", "controlo", "drible"],
-  fisico: ["resistencia"],
-};
 
 export const pushNews = (game, type, title, text, at = Date.now()) => {
   game.inbox.unshift({ at, type, title, text });
@@ -37,43 +31,15 @@ export const applyClubXp = (game, xp) => {
   return ups;
 };
 
-/* Estimativa de força do plantel (para simulações rápidas sem eventos). */
-export const userStrength = (game) => {
-  const overs = game.players
-    .filter((p) => (p.injuryMin ?? 0) <= 0)
-    .map((p) => overallBase(p) * fitnessFactor(p.fitness))
-    .sort((a, b) => b - a)
-    .slice(0, 11);
-  if (overs.length === 0) return 40;
-  const avg = overs.reduce((s, v) => s + v, 0) / overs.length;
-  return avg * Math.min(1, overs.length / 11);
-};
-
-/* Experiência de jogo de UM jogador (chamada por cada jogo disputado). */
-const growFromMatch = (p, kind, focus, treinoLvl, boosted, minutesRating = 1) => {
+/* XP de treino ganho por UM jogador num jogo (banked — o treinador gasta-o depois). */
+const matchTrainingXp = (p, kind, boosted) => {
   const ageMult = p.age <= 20 ? 1.35 : p.age <= 24 ? 1.05 : p.age <= 28 ? 0.75 : 0.35;
-  const gain =
-    MATCH_XP_BASE * (MATCH_XP_MULT[kind] ?? 1) * talentGrowth(p.talent) * ageMult *
-    (1 + treinoLvl * 0.08) * (boosted ? 2 : 1) * minutesRating;
-  const cap = talentCap(p.talent);
-  const add = (skill, mult) => {
-    p.skills[skill] = Math.min(cap, +(p.skills[skill] + gain * mult).toFixed(2));
-  };
-  const targets = FOCUS_SKILLS[focus];
-  // viés da posição: guarda-redes desenvolvem o seu ofício independentemente do foco
-  if (lineOf(p.pos) === "GR") {
-    add("controlo", 0.35); add("resistencia", 0.3); add("marcacao", 0.25); add("desarme", 0.2);
-  } else if (!targets) {
-    for (const s of SKILLS) add(s, 0.16); // misto
-  } else {
-    for (const s of targets) add(s, 0.45);
-    for (const s of SKILLS) if (!targets.includes(s)) add(s, 0.07);
-  }
-  return gain;
+  const xp = MATCH_XP_BASE * (MATCH_XP_MULT[kind] ?? 1) * talentGrowth(p.talent) * ageMult * (boosted ? 2 : 1);
+  return Math.max(1, Math.round(xp));
 };
 
 /* Aplica um resultado do utilizador ao estado (XP, dinheiro, energia, evolução…).
-   kind: "amigavel" | "liga" | "taca". MUTA o game (chamar sobre uma cópia). */
+   kind: "amigavel" | "taca". MUTA o game (chamar sobre uma cópia). */
 export const applyUserResult = (game, { kind, userSide, result, oppName, isHome, auto = false, forfeit = false }) => {
   const now = Date.now();
   const [gh, ga] = result.score;
@@ -99,7 +65,7 @@ export const applyUserResult = (game, { kind, userSide, result, oppName, isHome,
   game.club.morale = Math.max(5, Math.min(100, game.club.morale + (outcome === "V" ? 6 : outcome === "E" ? -1 : -7)));
   game.club.fans = Math.max(0, (game.club.fans ?? 100) + (outcome === "V" ? 18 + game.club.level * 6 : outcome === "E" ? 5 : -8));
 
-  // Jogadores: energia, estatísticas, lesões, castigos e EVOLUÇÃO POR JOGO
+  // Jogadores: energia, estatísticas, lesões, castigos e XP DE TREINO GANHO
   const xiIds = new Set((userSide === "H" ? result.homeXI : result.awayXI).map((x) => x.id));
   const userEvents = result.events.filter((e) => e.side === userSide);
   const goalsBy = {}, assistsBy = {};
@@ -116,7 +82,7 @@ export const applyUserResult = (game, { kind, userSide, result, oppName, isHome,
 
   const boosted = (game.flags?.trainBoostUntil ?? 0) > now;
   const moraleDelta = outcome === "V" ? 8 : outcome === "E" ? 3 : -6;
-  let grew = 0;
+  let xpGained = 0;
   for (const p of game.players) {
     if (competitive && p.suspension > 0 && !xiIds.has(p.id)) p.suspension--; // cumpriu jogo de castigo
     if (!xiIds.has(p.id)) continue;
@@ -125,7 +91,9 @@ export const applyUserResult = (game, { kind, userSide, result, oppName, isHome,
     p.stats.games++;
     p.stats.goals += goalsBy[p.id] ?? 0;
     p.stats.assists += assistsBy[p.id] ?? 0;
-    grew += growFromMatch(p, kind, game.trainingFocus, game.club.buildings.treino, boosted);
+    const xp = matchTrainingXp(p, kind, boosted);
+    p.trainingXp = (p.trainingXp ?? 0) + xp;
+    xpGained += xp;
     if (injuredMin[p.id]) {
       p.injuryMin = injuredMin[p.id];
       pushNews(game, "injury", "Lesão", `${p.name} lesionou-se — volta dentro de ${fmtDur(p.injuryMin)}.`);
@@ -142,7 +110,7 @@ export const applyUserResult = (game, { kind, userSide, result, oppName, isHome,
   game.history.unshift({ at: now, kind, opp: oppName, isHome, score: [gU, gO], outcome, auto });
   if (game.history.length > HISTORY_CAP) game.history.length = HISTORY_CAP;
 
-  return { outcome, reward: reward + tickets, xpGained: grew };
+  return { outcome, reward: reward + tickets, xpGained };
 };
 
 export const fmtDur = (min) => {

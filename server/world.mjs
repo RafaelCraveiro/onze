@@ -1,22 +1,18 @@
-/* Mundo de managers simulados — PARTILHADO por todo o servidor (uma só cópia
-   em memória, não por conta). Usado pelas taças (server/cups.mjs) e pelos
-   jogos amigáveis. As posições/força dos bots ficam fixas por processo —
-   suficiente para preencher vagas; não precisam de persistência própria. */
+/* Bots — simplificados: não há pool persistente de 140 managers com nomes
+   próprios. Um bot é literalmente "uma conta do sistema": gerado na hora,
+   com força derivada do nível pedido, para preencher vagas de taças ou
+   servir de adversário num amigável. Fica com o troféu se ganhar a sério a
+   equipas reais — não há mais conceito de identidade a preservar. */
 
-import { genWorld } from "../src/engine/generation.js";
+import { genBot } from "../src/engine/generation.js";
+import { mulberry32 } from "../src/engine/names.js";
 
-export const WORLD = genWorld(20260719);
-export const botById = new Map(WORLD.bots.map((b) => [b.id, b]));
+export const synthBot = (level, seed, label = "") => genBot(mulberry32(seed >>> 0), level, label);
 
-export const botsOfLevel = (level, exclude = new Set(), minCount = 8) => {
-  let pool = WORLD.bots.filter((b) => b.level === level && !exclude.has(b.id));
-  if (pool.length < minCount) pool = WORLD.bots.filter((b) => Math.abs(b.level - level) <= 1 && !exclude.has(b.id));
-  if (pool.length < minCount) pool = WORLD.bots.filter((b) => !exclude.has(b.id));
-  return pool;
-};
-
-export const pickBotNear = (level, rng = Math.random) => {
-  const near = WORLD.bots.filter((b) => Math.abs(b.level - level) <= 2);
-  const pool = near.length ? near : WORLD.bots;
-  return pool[Math.floor(rng() * pool.length)];
+// para amigáveis: nível "por perto" do clube (±2), sem pool a escolher — só sorteia o nível.
+export const synthBotNear = (level, seed) => {
+  const rng = mulberry32(seed >>> 0);
+  const delta = Math.floor(rng() * 5) - 2; // -2..+2
+  const lvl = Math.max(1, level + delta);
+  return genBot(rng, lvl);
 };

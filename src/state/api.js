@@ -36,7 +36,9 @@ export const apiState = () => call("GET", "/api/state");
 
 export const apiSetLineup = (formation, starters) => call("POST", "/api/lineup", { formation, starters });
 export const apiSetStyle = (style) => call("POST", "/api/tactics", { style });
-export const apiSetTraining = (focus) => call("POST", "/api/training", { focus });
+
+// distribuição manual de XP: sobe UM atributo de UM jogador (custa XP banked dele)
+export const apiTrain = (playerId, skill) => call("POST", `/api/squad/${playerId}/train`, { skill });
 
 export const apiBuy = (listingId) => call("POST", "/api/market/buy", { listingId });
 export const apiSell = (playerId, price) => call("POST", "/api/market/sell", { playerId, price });
@@ -62,5 +64,8 @@ export const API_ERROR_PT = {
   "dinheiro-insuficiente": "Não tens dinheiro suficiente.",
   "nivel-maximo": "Já está no nível máximo.",
   "ja-ativo": "Já está ativo.",
+  "atributo-invalido": "Atributo inválido.",
+  "teto-atingido": "Este atributo já está no teto (25).",
+  "xp-insuficiente": "Não tens XP suficiente para este jogador.",
 };
 export const errPt = (e) => API_ERROR_PT[e?.message] ?? `Erro inesperado (${e?.message ?? "?"}).`;

@@ -13,7 +13,7 @@ const load = (p) => server.ssrLoadModule(p);
 const { simulateMatch } = await load("/src/engine/match.js");
 const { prepareBotTeam, prepareUserTeam, autoPickXI } = await load("/src/engine/team.js");
 const { buildTimeline } = await load("/src/engine/timeline.js");
-const { xpForNext, totalSkill, talentCap, STARTING_MONEY } = await load("/src/engine/constants.js");
+const { xpForNext, totalSkill, talentCap, SKILL_CAP, trainCost, STARTING_MONEY } = await load("/src/engine/constants.js");
 const { applyClubXp, applyUserResult } = await load("/src/engine/progress.js");
 const { processTime } = await load("/src/engine/realtime.js");
 const { genInitialSquad } = await load("/src/engine/generation.js");
@@ -128,12 +128,12 @@ const newGame = () => {
   check("ultrapassar 100 XP sobe para o nível 2", fake.club.level === 2 && fake.club.xp === 2, `(nv${fake.club.level} xp${fake.club.xp})`);
 }
 
-/* ---------- 4. Evolução POR JOGO (talento manda) ---------- */
+/* ---------- 4. XP de treino banked POR JOGO (talento manda) + distribuição manual ---------- */
 {
-  console.log("\n[4] Os jogadores evoluem com os jogos que fazem");
+  console.log("\n[4] Os jogadores ganham XP com os jogos (banked) — o treinador distribui à mão");
   const game = newGame();
-  game.trainingFocus = "misto";
-  const before = new Map(game.players.map((p) => [p.id, totalSkill(p)]));
+  const beforeXp = new Map(game.players.map((p) => [p.id, p.trainingXp ?? 0]));
+  const beforeSkills = new Map(game.players.map((p) => [p.id, totalSkill(p)]));
   const N = 12;
   for (let i = 0; i < N; i++) {
     const user = prepareUserTeam(game);
@@ -142,20 +142,43 @@ const newGame = () => {
     applyUserResult(game, { kind: "taca", userSide: "H", result, oppName: "Bot FC", isHome: true });
     for (const p of game.players) { p.fitness = 100; p.injuryMin = 0; p.suspension = 0; }
   }
+  // as skills NÃO mudam sozinhas com os jogos — só o XP banked sobe
+  const skillDrift = game.players.some((p) => totalSkill(p) !== beforeSkills.get(p.id));
+  check("skills ficam intactas até o treinador gastar XP", !skillDrift);
+
   const growth = game.players
     .filter((p) => p.stats.games >= N * 0.6)
-    .map((p) => ({ talent: p.talent, age: p.age, delta: totalSkill(p) - before.get(p.id) }));
+    .map((p) => ({ talent: p.talent, age: p.age, delta: (p.trainingXp ?? 0) - beforeXp.get(p.id) }));
   const avg = growth.reduce((s, g) => s + g.delta, 0) / Math.max(1, growth.length);
   const hi = growth.filter((g) => g.talent >= 5 && g.age <= 24);
   const lo = growth.filter((g) => g.talent <= 2);
   const hiAvg = hi.length ? hi.reduce((s, g) => s + g.delta, 0) / hi.length : 0;
   const loAvg = lo.length ? lo.reduce((s, g) => s + g.delta, 0) / lo.length : 1;
-  console.log(`  ${N} jogos de taça: crescimento médio=+${avg.toFixed(1)} Skl · talento alto jovem=+${hiAvg.toFixed(1)} · talento baixo=+${loAvg.toFixed(1)}`);
-  check("titulares cresceram com os jogos", avg > 1, `(+${avg.toFixed(2)})`);
-  check("talento alto evolui mais que talento baixo", hi.length === 0 || lo.length === 0 || hiAvg > loAvg);
+  console.log(`  ${N} jogos de taça: XP banked médio=+${avg.toFixed(1)} · talento alto jovem=+${hiAvg.toFixed(1)} · talento baixo=+${loAvg.toFixed(1)}`);
+  check("titulares ganharam XP de treino com os jogos", avg > 0, `(+${avg.toFixed(2)})`);
+  check("talento alto ganha mais XP por jogo que talento baixo", hi.length === 0 || lo.length === 0 || hiAvg > loAvg);
+
+  // o treinador gasta agora manualmente o XP banked de UM jogador num atributo
+  const p = game.players.find((pl) => (pl.trainingXp ?? 0) > 0);
+  const skill = "passe";
+  const startSkill = p.skills[skill] ?? 0;
+  const startXp = p.trainingXp;
+  let spent = 0, ups = 0;
+  while (p.skills[skill] < SKILL_CAP) {
+    const cost = trainCost(Math.floor(p.skills[skill]));
+    if (p.trainingXp < cost) break;
+    p.trainingXp -= cost;
+    p.skills[skill] = Math.min(SKILL_CAP, Math.floor(p.skills[skill]) + 1);
+    spent += cost;
+    ups++;
+  }
+  check("gastar XP banked sobe o atributo escolhido", ups > 0 && p.skills[skill] === startSkill + ups, `(${startSkill}→${p.skills[skill]})`);
+  check("XP gasto bate certo com o custo acumulado (crescente)", p.trainingXp === startXp - spent, `(sobra=${p.trainingXp})`);
+  check("nunca ultrapassa o teto (25)", p.skills[skill] <= SKILL_CAP);
+
   let capped = 0;
-  for (const p of game.players) for (const v of Object.values(p.skills)) if (v > talentCap(p.talent) + 0.01) capped++;
-  check("nenhuma sub-habilidade acima do teto do talento", capped === 0, `(${capped})`);
+  for (const pl of game.players) for (const v of Object.values(pl.skills)) if (v > talentCap(pl.talent) + 0.01) capped++;
+  check("nenhuma sub-habilidade acima do teto (25)", capped === 0, `(${capped})`);
 }
 
 /* ---------- 5. (As taças são multi-jogador e vivem no servidor: scripts/cuptest.mjs) ---------- */
@@ -185,7 +208,7 @@ const newGame = () => {
     if (game.club.level > 30) bad.push("nível>30");
     for (const p of game.players) {
       if (p.fitness < 0 || p.fitness > 100) bad.push("energia fora de [0,100]");
-      for (const v of Object.values(p.skills)) if (v > 33) bad.push(`sub-skill ${v} acima do teto global`);
+      for (const v of Object.values(p.skills)) if (v > 25) bad.push(`sub-skill ${v} acima do teto global`);
     }
   }
   const size = JSON.stringify(game).length;

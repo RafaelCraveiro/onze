@@ -15,7 +15,7 @@ import { prepareBotTeam } from "../src/engine/team.js";
 import {
   CUP_SIZE, CUP_EVERY_MS, CUP_REG_WINDOW_MS, CUP_UPCOMING, cupEntryFee, cupPrize, cupRunnerUp,
 } from "../src/engine/constants.js";
-import { botById, botsOfLevel } from "./world.mjs";
+import { synthBot } from "./world.mjs";
 import * as club from "./club.mjs";
 
 const CUP_ICONS = ["🏆", "🐘", "🦉", "🎯", "🥇", "⚡", "🌟", "🔔"];
@@ -34,7 +34,7 @@ export const initCups = (database) => {
     );
     CREATE TABLE IF NOT EXISTS cup_entrants (
       cup_id TEXT, slot INT, kind TEXT, user_id INT, bot_id TEXT,
-      club_name TEXT, emblem TEXT, level INT,
+      club_name TEXT, emblem TEXT, level INT, str INT,
       PRIMARY KEY (cup_id, slot)
     );
     CREATE TABLE IF NOT EXISTS cup_matches (
@@ -48,6 +48,8 @@ export const initCups = (database) => {
       PRIMARY KEY (cup_id, round, slot)
     );
   `);
+  // migração leve: bases já existentes de antes dos bots simplificados não têm esta coluna
+  try { db.exec("ALTER TABLE cup_entrants ADD COLUMN str INT"); } catch { /* já existe */ }
 };
 
 /* ---------- acesso ---------- */
@@ -82,7 +84,9 @@ export const ensureUpcoming = (level, now) => {
 const isReady = (cup, round, entrant) => entrant.kind === "bot" || !!regOf(cup.id, round, entrant.slot);
 
 const teamForSlot = (entrant, seed) =>
-  entrant.kind === "bot" ? prepareBotTeam(botById.get(entrant.bot_id), seed % 100000) : club.buildXITeam(entrant.user_id);
+  entrant.kind === "bot"
+    ? prepareBotTeam({ id: entrant.bot_id, team: entrant.club_name, str: entrant.str, level: entrant.level }, seed % 100000)
+    : club.buildXITeam(entrant.user_id);
 
 const forfeitResult = (score, both = false) => ({
   score, forfeit: true, bothAbsent: both,
@@ -122,14 +126,13 @@ const playMatch = (cup, round, m, entrants, now) => {
 /* ---------- ciclo de vida ---------- */
 const startCup = (cup, _now) => {
   const ents = entrantsOf(cup.id);
-  const used = new Set(ents.map((e) => e.bot_id).filter(Boolean));
-  const pool = botsOfLevel(cup.level, used);
   const rng = rndFrom((Number(cup.starts_at) / 1000) >>> 0);
   let slot = ents.length;
-  while (slot < cup.size && pool.length) {
-    const b = pool.splice(Math.floor(rng() * pool.length), 1)[0];
-    db.prepare("INSERT INTO cup_entrants (cup_id, slot, kind, bot_id, club_name, emblem, level) VALUES (?, ?, 'bot', ?, ?, ?, ?)")
-      .run(cup.id, slot, b.id, b.team, JSON.stringify(b.emblem), b.level);
+  while (slot < cup.size) {
+    // bot gerado na hora — "literalmente uma conta do sistema", sem pool a esgotar
+    const b = synthBot(cup.level, Math.floor(rng() * 1e9), String(slot + 1));
+    db.prepare("INSERT INTO cup_entrants (cup_id, slot, kind, bot_id, club_name, emblem, level, str) VALUES (?, ?, 'bot', ?, ?, ?, ?, ?)")
+      .run(cup.id, slot, b.id, b.team, JSON.stringify(b.emblem), b.level, b.str);
     slot++;
   }
   const order = [...Array(cup.size).keys()];

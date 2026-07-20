@@ -13,6 +13,7 @@
 import {
   STARTING_MONEY, SQUAD_MIN, BUILDINGS, buildingCost, BOOSTERS,
   TRAIN_BOOST_MS, MARKET_UNLOCK_LEVEL, FORMATIONS, STYLES,
+  SKILLS, SKILL_CAP, trainCost,
 } from "../src/engine/constants.js";
 import { genInitialSquad } from "../src/engine/generation.js";
 import { autoPickXI, prepareUserTeam } from "../src/engine/team.js";
@@ -39,7 +40,8 @@ export const initClub = (database) => {
       id TEXT PRIMARY KEY, user_id INTEGER NOT NULL,
       name TEXT, nat TEXT, flag TEXT, pos TEXT, age INTEGER, talent INTEGER,
       skills TEXT NOT NULL, fitness REAL NOT NULL, morale REAL NOT NULL,
-      injury_min REAL NOT NULL, suspension INTEGER NOT NULL, stats TEXT NOT NULL, selling INTEGER
+      injury_min REAL NOT NULL, suspension INTEGER NOT NULL, stats TEXT NOT NULL, selling INTEGER,
+      training_xp INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_players_user ON players(user_id);
     CREATE TABLE IF NOT EXISTS market (
@@ -49,6 +51,8 @@ export const initClub = (database) => {
       user_id INTEGER PRIMARY KEY, account TEXT NOT NULL, inbox TEXT NOT NULL, history TEXT NOT NULL, created_at INTEGER NOT NULL
     );
   `);
+  // migração leve: contas já existentes de antes do banco de XP manual não têm esta coluna
+  try { db.exec("ALTER TABLE players ADD COLUMN training_xp INTEGER NOT NULL DEFAULT 0"); } catch { /* já existe */ }
 };
 
 const safeJSON = (s, fallback = {}) => { try { return JSON.parse(s); } catch { return fallback; } };
@@ -59,6 +63,7 @@ const rowToPlayer = (row) => ({
   skills: safeJSON(row.skills, {}),
   fitness: row.fitness, morale: row.morale, injuryMin: row.injury_min, suspension: row.suspension,
   stats: safeJSON(row.stats, { games: 0, goals: 0, assists: 0 }),
+  trainingXp: row.training_xp ?? 0,
   ...(row.selling != null ? { selling: row.selling } : {}),
 });
 
@@ -68,13 +73,13 @@ const identityOf = (userId) => {
 };
 
 const insertPlayers = (userId, players) => {
-  const stmt = db.prepare(`INSERT INTO players (id, user_id, name, nat, flag, pos, age, talent, skills, fitness, morale, injury_min, suspension, stats, selling)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const stmt = db.prepare(`INSERT INTO players (id, user_id, name, nat, flag, pos, age, talent, skills, fitness, morale, injury_min, suspension, stats, selling, training_xp)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   for (const p of players) {
     stmt.run(
       p.id, userId, p.name, p.nat, p.flag, p.pos, p.age, p.talent, JSON.stringify(p.skills ?? {}),
       p.fitness ?? 100, p.morale ?? 0, p.injuryMin ?? 0, p.suspension ?? 0,
-      JSON.stringify(p.stats ?? { games: 0, goals: 0, assists: 0 }), p.selling ?? null
+      JSON.stringify(p.stats ?? { games: 0, goals: 0, assists: 0 }), p.selling ?? null, Math.max(0, Math.round(p.trainingXp ?? 0))
     );
   }
 };
@@ -319,10 +324,20 @@ export const setStyle = (userId, style, now = Date.now()) => {
   return { ok: true };
 };
 
-const TRAINING_FOCI = new Set(["misto", "ataque", "defesa", "tecnica", "fisico"]);
-export const setTrainingFocus = (userId, focus, now = Date.now()) => {
+/* Distribuição manual de XP: o treinador escolhe QUAL atributo sobe, gastando
+   o XP banked do jogador (ganho a jogar — ver matchTrainingXp em progress.js).
+   Custo cresce com o valor atual (trainCost); teto plano SKILL_CAP (=25). */
+export const trainSkill = (userId, playerId, skill, now = Date.now()) => {
   const game = tickClub(userId, now);
-  if (TRAINING_FOCI.has(focus)) game.trainingFocus = focus;
+  if (!SKILLS.includes(skill)) return { error: "atributo-invalido" };
+  const p = game.players.find((p) => p.id === playerId);
+  if (!p) return { error: "jogador-inexistente" };
+  const cur = p.skills[skill] ?? 0;
+  if (cur >= SKILL_CAP) return { error: "teto-atingido" };
+  const cost = trainCost(cur);
+  if ((p.trainingXp ?? 0) < cost) return { error: "xp-insuficiente" };
+  p.trainingXp -= cost;
+  p.skills[skill] = Math.min(SKILL_CAP, Math.floor(cur) + 1);
   persistGame(userId, game);
-  return { ok: true };
+  return { ok: true, newValue: p.skills[skill], remainingXp: p.trainingXp };
 };

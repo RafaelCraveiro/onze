@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { initCups, listCups, enroll, registerTeam, matchResultFor } from "./cups.mjs";
 import * as club from "./club.mjs";
-import { pickBotNear } from "./world.mjs";
+import { synthBotNear } from "./world.mjs";
 import { simulateMatch } from "../src/engine/match.js";
 import { prepareBotTeam } from "../src/engine/team.js";
 
@@ -134,8 +134,10 @@ app.post("/api/lineup", auth, (req, res) => {
 app.post("/api/tactics", auth, (req, res) => {
   reply(res, club.setStyle(req.userId, String(req.body?.style ?? ""), Date.now()));
 });
-app.post("/api/training", auth, (req, res) => {
-  reply(res, club.setTrainingFocus(req.userId, String(req.body?.focus ?? ""), Date.now()));
+
+// distribuição manual de XP: sobe UM atributo de UM jogador, gastando o XP banked dele
+app.post("/api/squad/:id/train", auth, (req, res) => {
+  reply(res, club.trainSkill(req.userId, req.params.id, String(req.body?.skill ?? ""), Date.now()));
 });
 
 app.post("/api/market/buy", auth, (req, res) => {
@@ -164,7 +166,7 @@ app.post("/api/matches/friendly", auth, (req, res) => {
   const now = Date.now();
   const userTeam = club.buildXITeam(req.userId, now);
   const level = club.userLevel(req.userId, now);
-  const oppBot = pickBotNear(level);
+  const oppBot = synthBotNear(level, Math.floor(now / 60000) ^ req.userId);
   const isHome = Math.random() < 0.5;
   const botTeam = prepareBotTeam(oppBot, Math.floor(now / 3600000) % 100000);
   const result = isHome ? simulateMatch({ home: userTeam, away: botTeam }) : simulateMatch({ home: botTeam, away: userTeam });

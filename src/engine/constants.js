@@ -34,9 +34,28 @@ export const posPenalty = (from, to) => {
   return Math.abs(LINE_ORDER[lf] - LINE_ORDER[lt]) === 1 ? 0.8 : 0.62;
 };
 
-// "Overall" de um jogador num slot (usado para escolher onze e para a força da equipa).
-export const overallAt = (p, pos) => Math.round(totalSkill(p) * posPenalty(p.pos, pos));
-export const overallBase = (p) => totalSkill(p);
+/* Pesos por linha — usados TANTO para gerar jogadores (generation.js) COMO
+   para os avaliar (overallAt abaixo). Um avançado com 25/25 em potência e
+   precisão vale tanto como outro com os mesmos dois atributos, mesmo que os
+   restantes estejam mal distribuídos — o que conta é o que interessa à
+   posição, não a soma total de tudo. */
+export const RATING_WEIGHTS = {
+  GR: { desarme: 1.1, marcacao: 1.2, controlo: 1.3, resistencia: 1.2, passe: 0.9, drible: 0.6, potencia: 0.6, precisao: 0.7 },
+  DF: { desarme: 1.5, marcacao: 1.5, resistencia: 1.2, controlo: 0.9, passe: 0.9, drible: 0.7, potencia: 0.7, precisao: 0.6 },
+  MD: { passe: 1.4, controlo: 1.3, drible: 1.1, resistencia: 1.1, desarme: 0.9, marcacao: 0.8, potencia: 0.8, precisao: 0.8 },
+  AV: { potencia: 1.5, precisao: 1.5, drible: 1.2, controlo: 1.1, passe: 0.8, resistencia: 0.9, desarme: 0.5, marcacao: 0.5 },
+};
+
+// "Overall" de um jogador num slot: MÉDIA PONDERADA dos atributos relevantes
+// para essa posição (não a soma total) — na mesma escala 0-25 dos atributos,
+// depois penalizada se for fora da posição natural do jogador.
+export const overallAt = (p, pos) => {
+  const w = RATING_WEIGHTS[lineOf(pos)];
+  let sw = 0, sv = 0;
+  for (const k of SKILLS) { sw += w[k]; sv += w[k] * (p.skills[k] ?? 0); }
+  return Math.round((sv / sw) * posPenalty(p.pos, pos));
+};
+export const overallBase = (p) => overallAt(p, p.pos);
 
 /* ---------- Formações: slots [pos, avanço, largura] em coords normalizadas ---------- */
 export const FORMATIONS = {
@@ -79,10 +98,17 @@ export const STYLES = {
   ofensivo: { atk: 1.12, def: 0.9, label: "Ofensivo" },
 };
 
-/* ---------- Talento e progressão ---------- */
-// Talento 1–9: acelera o treino e define o teto de CADA sub-habilidade.
-export const talentCap = (talent) => Math.round(12 + talent * 2.2); // t1=14 … t9=32 (Skl máx ≈ 8×teto)
+/* ---------- Talento e progressão ----------
+   O talento já não define o teto — define só a VELOCIDADE a que o jogador
+   ganha XP a jogar (quanto mais talento, mais XP por jogo). O teto é, para
+   já, plano para todos: 25 por atributo (depois afinamos isto melhor). */
+export const SKILL_CAP = 25;
+export const talentCap = (_talent) => SKILL_CAP;
 export const talentGrowth = (talent) => 0.55 + talent * 0.16;
+
+// Custo em XP para subir UM ponto num atributo que está no valor `cur`
+// (quanto mais alto já está, mais caro fica o próximo ponto).
+export const trainCost = (cur) => Math.floor(cur) + 1;
 
 // Plantel inicial: fraco, com sorte MUITO rara de um 7 (~1%). Nunca 8/9.
 export const INITIAL_TALENT_WEIGHTS = [
@@ -124,9 +150,11 @@ export const YOUTH_EVERY_MS = 6 * HOUR_MS;          // academia gera um jovem de
 export const AGE_MS = 4 * 24 * HOUR_MS;             // os jogadores envelhecem +1 ano a cada 4 dias reais
 export const FITNESS_REGEN_PER_MIN = 0.6;           // recupera de um jogo em ~40 min
 
-/* Experiência de jogo: os jogadores evoluem ao JOGAR, consoante o talento.
-   As taças dão experiência a dobrar (como o "Player's Experience: 200%" do 11x11). */
-export const MATCH_XP_BASE = 0.5;                   // pontos de sub-habilidade por jogo (antes dos multiplicadores)
+/* Experiência de jogo: os jogadores GANHAM XP ao jogar, consoante o talento
+   (mais talento = mais XP por jogo), e o TREINADOR distribui esse XP pelos
+   atributos que quiser (ver trainCost acima). Taças dão XP a dobrar (como o
+   "Player's Experience: 200%" do 11x11). */
+export const MATCH_XP_BASE = 6;                     // XP base por jogo (antes dos multiplicadores)
 export const MATCH_XP_MULT = { taca: 2, amigavel: 0.6 };
 
 /* ---------- Economia (sem salários: os jogadores têm apenas valor de venda) ---------- */
@@ -173,6 +201,5 @@ export const SQUAD_MIN = 13;
 export const MARKET_UNLOCK_LEVEL = 3;
 export const MARKET_DRIP_COUNT = 3;
 export const MARKET_DRIP_MS = 24 * 60 * 60 * 1000; // um lote novo por dia
-export const WORLD_BOTS = 140;
 export const INBOX_CAP = 60;
 export const HISTORY_CAP = 40;
