@@ -5,7 +5,7 @@ import { createMemoryDb } from "../server/db.mjs";
 import { createServer } from "vite";
 
 const server = await createServer({ root: process.cwd(), server: { middlewareMode: true }, logLevel: "error" });
-const { MARKET_UNLOCK_LEVEL, STARTING_MONEY, buildingCost, totalSkill } = await server.ssrLoadModule("/src/engine/constants.js");
+const { MARKET_UNLOCK_LEVEL, STARTING_MONEY, buildingCost, overallBase, playerValue } = await server.ssrLoadModule("/src/engine/constants.js");
 
 const db = await createMemoryDb();
 await db.exec(`
@@ -25,7 +25,8 @@ let now = Date.now();
 await club.initClubForUser(1, now); // só cria — ainda sem nenhum tick
 let g = await club.loadGame(1);
 check("dinheiro inicial correto", g.club.money === STARTING_MONEY, `(${g.club.money})`);
-check("18 jogadores no plantel inicial", g.players.length === 18, `(${g.players.length})`);
+check("20 jogadores no plantel inicial", g.players.length === 20, `(${g.players.length})`);
+check("todos têm atributos 1-99, potencial e contrato", g.players.every((p) => p.skills.finalizacao >= 1 && p.skills.finalizacao <= 99 && p.pot >= overallBase(p) && p.contract >= 2));
 check("nível 1", g.club.level === 1);
 check("estádio começa no nível 0 (0 lugares)", g.club.buildings.estadio === 0, `(${g.club.buildings.estadio})`);
 check("mercado sem tick ainda não gerou nada", g.market.listings.length === 0);
@@ -114,7 +115,26 @@ check("nível migrado corretamente", migrated.club.level === 7);
 check("jogador legado migrado", migrated.players.some((p) => p.id === "legacy-p1"));
 check("registo (V-E-D) migrado", migrated.account.wins === 15 && migrated.account.losses === 5);
 check("troféu migrado", migrated.account.trophies.length === 1);
-check("Skl do jogador legado preservado", totalSkill(migrated.players.find((p) => p.id === "legacy-p1")) === 105);
+const old = migrated.players.find((p) => p.id === "legacy-p1");
+check("jogador antigo convertido para o modelo novo", old.skills.desarme === undefined && old.skills.finalizacao === Math.round(17.5 * 4) && old.pot >= overallBase(old) && old.contract >= 2, JSON.stringify(old.skills));
+check("jogador antigo tem valor", playerValue(old) > 0);
+
+console.log("\n[5b] Foco, renovação e salários");
+const focusOk = await club.setFocus(1, g.players[1].id, "fisico", now);
+check("definir foco aceite", focusOk.ok);
+check("foco fica guardado", (await club.loadGame(1)).players.find((p) => p.id === g.players[1].id)?.focus === "fisico");
+check("foco inválido recusado", (await club.setFocus(1, g.players[1].id, "voar", now)).error === "atributo-invalido");
+await db.prepare("UPDATE club SET money = 900000 WHERE user_id = 1").run();
+const before = (await club.loadGame(1)).players.find((p) => p.id === g.players[1].id).contract;
+check("renovação aceite", (await club.renewPlayer(1, g.players[1].id, now)).ok);
+check("renovação soma épocas", (await club.loadGame(1)).players.find((p) => p.id === g.players[1].id).contract === Math.min(5, before + 2));
+const payT = now + 2 * 24 * 60 * 60 * 1000 + 1000;
+const m0 = (await club.loadGame(1)).club.money;
+const paid = await club.tickClub(1, payT);
+check("salários são descontados com o tempo", paid.club.money < m0, `(${m0} → ${paid.club.money})`);
+await db.prepare("UPDATE club SET money = 0 WHERE user_id = 1").run();
+const broke = await club.tickClub(1, payT + 2 * 24 * 60 * 60 * 1000);
+check("sem dinheiro não cria dívida", broke.club.money === 0, `(${broke.club.money})`);
 
 console.log("\n[6] Calendário único de envelhecimento para todo o servidor");
 const { AGE_MS, nextAgeBoundary } = await server.ssrLoadModule("/src/engine/constants.js");

@@ -23,20 +23,20 @@ export default function AuthView({ auth, actions }) {
   return (
     <div className="mx-auto flex min-h-screen max-w-lg flex-col items-center justify-center gap-6 p-6">
       <div className="text-center">
-        <h1 className="text-5xl font-black tracking-tight">
-          <span className="text-[#5da814]">On</span><span className="text-[#3a4030]">ze</span> ⚽
+        <h1 className="font-display text-7xl font-bold uppercase leading-none tracking-tight">
+          <span className="text-[var(--accent)]">On</span>ze
         </h1>
-        <p className="text-sm text-[#8a9077]">manager de futebol online — uma conta, um clube único</p>
+        <p className="text-sm text-[var(--t3)]">manager de futebol online — uma conta, um clube único</p>
       </div>
 
-      <div className="w-full rounded-xl border border-[#d9dcc8] bg-white p-6 shadow">
+      <div className="w-full rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-6">
         {/* separadores login / registo */}
         <div className="mb-4 flex gap-1.5">
           {[["login", "Entrar"], ["register", "Criar conta"]].map(([k, label]) => (
             <button
               key={k}
               onClick={() => { setMode(k); setStep(0); }}
-              className={`flex-1 rounded-md px-3 py-1.5 text-sm font-bold ${mode === k ? "btn-green" : "border border-[#c9cdb6] bg-white text-[#3a4030] hover:bg-[#f4f5ec]"}`}
+              className={`flex-1 rounded-md px-3 py-1.5 text-sm font-bold ${mode === k ? "btn-green" : "bg-[var(--s2)] text-[var(--t2)] hover:bg-[var(--s3)]"}`}
             >
               {label}
             </button>
@@ -44,7 +44,7 @@ export default function AuthView({ auth, actions }) {
         </div>
 
         {auth.error && (
-          <p className="mb-3 rounded-md border border-[#e8b4ae] bg-[#fdeeec] px-3 py-2 text-sm font-semibold text-[#c0392b]">
+          <p className="mb-3 rounded-md border border-[var(--danger-line)] bg-[var(--danger-soft)] px-3 py-2 text-sm font-semibold text-[var(--danger)]">
             {auth.error}
           </p>
         )}
@@ -71,7 +71,7 @@ export default function AuthView({ auth, actions }) {
         {mode === "register" && step === 1 && (
           <div className="onze-pop flex flex-col gap-3">
             <div className="flex items-center justify-between">
-              <p className="text-sm font-bold text-[#4f7a12]">O emblema do {clubName.trim()}</p>
+              <p className="text-sm font-bold text-[var(--green)]">O emblema do {clubName.trim()}</p>
               <Btn kind="dark" onClick={() => setEmblem(randomEmblem(Math.random))}>🎲</Btn>
             </div>
             <div className="flex justify-center"><Emblem emblem={emblem} size={110} /></div>
@@ -90,7 +90,7 @@ export default function AuthView({ auth, actions }) {
                   key={c}
                   onClick={() => set(emblem.c1 === c ? "c2" : "c1", c)}
                   title="clique: cor principal · se já for principal: secundária"
-                  className={`h-6 w-6 rounded-full border-2 ${emblem.c1 === c ? "scale-110 border-[#3a4030]" : emblem.c2 === c ? "border-[#c98d09]" : "border-[#d9dcc8]"}`}
+                  className={`h-6 w-6 rounded-full border-2 ${emblem.c1 === c ? "scale-110 border-[var(--t2)]" : emblem.c2 === c ? "border-[var(--gold)]" : "border-[var(--line)]"}`}
                   style={{ backgroundColor: c }}
                 />
               ))}
@@ -105,7 +105,7 @@ export default function AuthView({ auth, actions }) {
         )}
       </div>
 
-      <p className="max-w-sm text-center text-[11px] text-[#9aa08e]">
+      <p className="max-w-sm text-center text-[11px] text-[var(--t3)]">
         Conta online com save na base de dados do servidor — podes entrar de qualquer browser.
         Cada email e cada nome de clube são únicos.
       </p>
@@ -115,21 +115,21 @@ export default function AuthView({ auth, actions }) {
 
 const Field = ({ label, value, onChange, type = "text", placeholder, maxLength }) => (
   <label className="flex flex-col gap-1 text-sm">
-    <span className="text-[#8a9077]">{label}</span>
+    <span className="text-[var(--t3)]">{label}</span>
     <input
       type={type}
       value={value}
       maxLength={maxLength}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
-      className="rounded-md border border-[#c9cdb6] bg-white px-3 py-2 outline-none focus:border-[#5da814]"
+      className="rounded-lg border border-[var(--line)] bg-[var(--s2)] px-3 py-2.5 text-[var(--t1)] outline-none transition focus:border-[var(--accent)]"
     />
   </label>
 );
 
 const Row = ({ label, children }) => (
   <div className="flex flex-col gap-1.5">
-    <span className="text-xs font-semibold uppercase tracking-wide text-[#8a9077]">{label}</span>
+    <span className="text-xs font-semibold uppercase tracking-wide text-[var(--t3)]">{label}</span>
     <div className="flex flex-wrap gap-1.5">{children}</div>
   </div>
 );
@@ -137,7 +137,7 @@ const Row = ({ label, children }) => (
 const Chip = ({ active, onClick, children }) => (
   <button
     onClick={onClick}
-    className={`rounded-md px-2.5 py-1 text-sm font-semibold transition ${active ? "btn-green" : "border border-[#c9cdb6] bg-white text-[#3a4030] hover:bg-[#f4f5ec]"}`}
+    className={`rounded-md px-2.5 py-1 text-sm font-semibold transition ${active ? "btn-green" : "bg-[var(--s2)] text-[var(--t2)] hover:bg-[var(--s3)]"}`}
   >
     {children}
   </button>

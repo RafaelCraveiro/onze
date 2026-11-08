@@ -1,27 +1,47 @@
 /* Constantes do jogo — tudo o que é afinável vive aqui. */
 
-/* ---------- Posições (estilo 11x11) ---------- */
+/* ---------- Posições ---------- */
 export const POSITIONS = ["Gk", "Ld", "Cd", "Rd", "Lm", "Cm", "Rm", "Lf", "Cf", "Rf"];
 export const POS_LINE = {
   Gk: "GR", Ld: "DF", Cd: "DF", Rd: "DF",
   Lm: "MD", Cm: "MD", Rm: "MD", Lf: "AV", Cf: "AV", Rf: "AV",
 };
 export const LINE_LABEL = { GR: "Guarda-redes", DF: "Defesa", MD: "Médio", AV: "Avançado" };
-export const POS_COLOR = { GR: "#d97706", DF: "#2563eb", MD: "#16a34a", AV: "#dc2626" };
+export const POS_COLOR = { GR: "#f5b83d", DF: "#6aaeff", MD: "#5fe08c", AV: "#ff6b6f" };
 export const lineOf = (pos) => POS_LINE[pos] ?? "MD";
+export const POS_LABEL = { Gk: "GR", Ld: "DE", Cd: "DC", Rd: "DD", Lm: "ME", Cm: "MC", Rm: "MD", Lf: "EE", Cf: "PL", Rf: "ED" };
 
-/* ---------- Sub-habilidades (como no 11x11: o Skl é a SOMA das 8) ---------- */
-export const SKILLS = ["desarme", "marcacao", "drible", "controlo", "resistencia", "passe", "potencia", "precisao"];
+/* ---------- Atributos (1 a 99) ---------- */
+export const SKILLS = ["finalizacao", "criacao", "velocidade", "fisico", "defesa", "reflexos"];
 export const SKILL_LABEL = {
-  desarme: "Desarme", marcacao: "Marcação", drible: "Drible", controlo: "Controlo de bola",
-  resistencia: "Resistência", passe: "Passe", potencia: "Potência de remate", precisao: "Precisão de remate",
+  finalizacao: "Finalização", criacao: "Criação", velocidade: "Velocidade",
+  fisico: "Físico", defesa: "Defesa", reflexos: "Reflexos",
+};
+export const SKILL_CAP = 99;
+
+/* Características: pequenos bónus que dão personalidade aos jogadores. */
+export const TRAITS = {
+  finalizador: { label: "Finalizador", desc: "Mais frio em frente à baliza.", lines: ["AV", "MD"], boost: { finalizacao: 1.1 } },
+  criativo: { label: "Criativo", desc: "Vê passes que os outros não veem.", lines: ["MD", "AV"], boost: { criacao: 1.1 } },
+  muralha: { label: "Muralha", desc: "Muito difícil de ultrapassar.", lines: ["DF", "MD"], boost: { defesa: 1.1 } },
+  pulmao: { label: "Pulmão", desc: "Aguenta o ritmo até ao fim.", lines: ["DF", "MD", "AV"], boost: { fisico: 1.15 } },
+  foguete: { label: "Foguete", desc: "Explosivo no contra-ataque.", lines: ["DF", "MD", "AV"], boost: { velocidade: 1.12 } },
+  aereo: { label: "Jogo aéreo", desc: "Domina as bolas altas.", lines: ["DF", "AV"], boost: { fisico: 1.06, finalizacao: 1.03 } },
+  lider: { label: "Líder", desc: "Levanta o moral da equipa.", lines: ["GR", "DF", "MD", "AV"], boost: {} },
+  paredao: { label: "Paredão", desc: "Reflexos de outro mundo.", lines: ["GR"], boost: { reflexos: 1.1 } },
 };
 
-export const totalSkill = (p) => Math.floor(SKILLS.reduce((s, k) => s + (p.skills[k] ?? 0), 0));
-
-// Contribuições para o motor de jogo (defesa reforçada para equilibrar o xG).
-export const atkOf = (p) => p.skills.potencia + p.skills.precisao + p.skills.drible + 0.6 * p.skills.controlo + 0.4 * p.skills.passe;
-export const defOf = (p) => 1.35 * (p.skills.desarme + p.skills.marcacao + 0.5 * p.skills.resistencia + 0.3 * p.skills.controlo);
+/* Tradução dos atributos para os valores que o motor de jogo usa (escala interna). */
+export const engineProfile = (p) => {
+  const a = { ...p.skills };
+  for (const t of p.traits ?? []) for (const [k, m] of Object.entries(TRAITS[t]?.boost ?? {})) a[k] = (a[k] ?? 1) * m;
+  const q = (k) => Math.max(1, (a[k] ?? 1) / 4);
+  if (p.pos === "Gk") {
+    const r = q("reflexos");
+    return { desarme: r, marcacao: r, controlo: r * 1.05, resistencia: r * 1.05, precisao: r, passe: q("criacao"), drible: q("velocidade"), potencia: q("finalizacao") };
+  }
+  return { desarme: q("defesa"), marcacao: q("defesa"), drible: q("velocidade"), controlo: q("criacao"), passe: q("criacao"), resistencia: q("fisico"), potencia: q("finalizacao"), precisao: q("finalizacao") };
+};
 export const gkOf = (p) => 0.5 * (p.skills.desarme + p.skills.marcacao) + p.skills.controlo + p.skills.resistencia + 0.5 * p.skills.precisao;
 
 /* Penalização fora de posição: mesma posição 1.0; mesma linha 0.94; linha vizinha 0.8; longe 0.62. */
@@ -34,29 +54,40 @@ export const posPenalty = (from, to) => {
   return Math.abs(LINE_ORDER[lf] - LINE_ORDER[lt]) === 1 ? 0.8 : 0.62;
 };
 
-/* Pesos por linha — usados TANTO para gerar jogadores (generation.js) COMO
-   para os avaliar (overallAt abaixo). Um avançado com 25/25 em potência e
-   precisão vale tanto como outro com os mesmos dois atributos, mesmo que os
-   restantes estejam mal distribuídos — o que conta é o que interessa à
-   posição, não a soma total de tudo. */
+/* O que conta para a qualidade de cada setor (soma 1). */
 export const RATING_WEIGHTS = {
-  GR: { desarme: 1.1, marcacao: 1.2, controlo: 1.3, resistencia: 1.2, passe: 0.9, drible: 0.6, potencia: 0.6, precisao: 0.7 },
-  DF: { desarme: 1.5, marcacao: 1.5, resistencia: 1.2, controlo: 0.9, passe: 0.9, drible: 0.7, potencia: 0.7, precisao: 0.6 },
-  MD: { passe: 1.4, controlo: 1.3, drible: 1.1, resistencia: 1.1, desarme: 0.9, marcacao: 0.8, potencia: 0.8, precisao: 0.8 },
-  AV: { potencia: 1.5, precisao: 1.5, drible: 1.2, controlo: 1.1, passe: 0.8, resistencia: 0.9, desarme: 0.5, marcacao: 0.5 },
+  GR: { reflexos: 0.85, fisico: 0.1, criacao: 0.05, velocidade: 0, finalizacao: 0, defesa: 0 },
+  DF: { defesa: 0.55, fisico: 0.25, velocidade: 0.1, criacao: 0.1, finalizacao: 0, reflexos: 0 },
+  MD: { criacao: 0.5, defesa: 0.15, fisico: 0.15, velocidade: 0.1, finalizacao: 0.1, reflexos: 0 },
+  AV: { finalizacao: 0.5, velocidade: 0.25, criacao: 0.15, fisico: 0.1, defesa: 0, reflexos: 0 },
 };
-
-// Overall MOSTRADO = a SOMA dos 8 atributos (estilo 11x11, máx. 8×25=200).
-// A avaliação num slot mantém os pesos por posição (atributos relevantes
-// contam mais), mas reprojetada nessa mesma escala de soma, para que um
-// avançado com remate alto valha mais NUM slot de avançado — sem mudar a
-// escala que o jogador vê.
-export const overallBase = (p) => totalSkill(p);
-export const overallAt = (p, pos) => {
+const ratingFor = (p, pos) => {
   const w = RATING_WEIGHTS[lineOf(pos)];
-  let sw = 0, sv = 0;
-  for (const k of SKILLS) { sw += w[k]; sv += w[k] * (p.skills[k] ?? 0); }
-  return Math.round((sv / sw) * SKILLS.length * posPenalty(p.pos, pos));
+  return SKILLS.reduce((s, k) => s + w[k] * (p.skills[k] ?? 0), 0);
+};
+export const overallBase = (p) => Math.round(ratingFor(p, p.pos));
+export const overallAt = (p, pos) => Math.round(ratingFor(p, pos) * posPenalty(p.pos, pos));
+
+/* Jogadores guardados no modelo antigo passam para o novo ao serem lidos. */
+export const isLegacySkills = (s) => s && s.desarme != null;
+export const convertLegacyPlayer = (p) => {
+  if (!isLegacySkills(p.skills)) return p;
+  const o = p.skills, scale = (v) => Math.round(Math.max(1, Math.min(99, v * 4)));
+  const seed = [...String(p.id)].reduce((s, c) => (s * 31 + c.charCodeAt(0)) >>> 0, 7);
+  const isGk = p.pos === "Gk";
+  const skills = {
+    finalizacao: scale((o.potencia + o.precisao) / 2), criacao: scale((o.passe + o.controlo) / 2), velocidade: scale(o.drible),
+    fisico: scale(o.resistencia), defesa: scale((o.desarme + o.marcacao) / 2),
+    reflexos: isGk ? scale((0.5 * (o.desarme + o.marcacao) + o.controlo + o.resistencia + 0.5 * o.precisao) / 3.6) : 8 + (seed % 10),
+  };
+  const out = { ...p, skills, focus: p.focus ?? null };
+  const ovr = overallBase(out);
+  const line = lineOf(p.pos);
+  const pool = Object.entries(TRAITS).filter(([, t]) => t.lines.includes(line)).map(([k]) => k);
+  out.traits = p.traits?.length ? p.traits : seed % 100 < 42 ? [pool[seed % pool.length]] : [];
+  out.pot = Math.round(Math.min(97, Math.max(ovr, ovr + (p.age <= 22 ? 6 : p.age <= 26 ? 3 : 0) + (p.talent ?? p.pot ?? 3) * 1.6)));
+  out.contract = p.contract ?? 2 + (seed % 3);
+  return out;
 };
 
 /* ---------- Formações: slots [pos, avanço, largura] em coords normalizadas ---------- */
@@ -117,50 +148,28 @@ export const MATCHUP = {
   equilibrado: {},
 };
 
-/* ---------- Talento e progressão ----------
-   O talento já não define o teto — define só a VELOCIDADE a que o jogador
-   ganha XP a jogar (quanto mais talento, mais XP por jogo). O teto é, para
-   já, plano para todos: 25 por atributo (depois afinamos isto melhor). */
-export const SKILL_CAP = 25;
-export const talentCap = (_talent) => SKILL_CAP;
-export const talentGrowth = (talent) => 0.55 + talent * 0.16;
+/* ---------- Evolução: automática ao jogar, orientada pelo foco escolhido ---------- */
+export const growthCost = (cur) => Math.round(24 + cur * 0.25);
+export const potentialGrade = (pot) => (pot >= 85 ? "S" : pot >= 75 ? "A" : pot >= 65 ? "B" : pot >= 55 ? "C" : "D");
 
-// Custo em XP para subir UM ponto num atributo que está no valor `cur`
-// (quanto mais alto já está, mais caro fica o próximo ponto).
-export const trainCost = (cur) => Math.floor(cur) + 1;
-
-// Plantel inicial: fraco, com sorte MUITO rara de um 7 (~1%). Nunca 8/9.
-export const INITIAL_TALENT_WEIGHTS = [
-  [1, 20], [2, 26], [3, 26], [4, 17], [5, 8], [6, 2], [7, 1],
-];
-
-// Academia: talento 7 raro e 8 muito raro, ambos a crescer devagar com o nível
-// do clube; 9 praticamente lendário (só surge a nível muito alto).
-export const academyTalentWeights = (lvl) => [
-  [2, 22], [3, 24], [4, 22], [5, 16 + Math.floor(lvl / 2)], [6, 8 + Math.floor(lvl / 3)],
-  [7, Math.max(1, Math.floor(lvl / 6))],
-  [8, Math.max(0, Math.floor((lvl - 8) / 4))],
-  [9, Math.max(0, Math.floor((lvl - 18) / 6))],
-];
-
-/* ---------- Nível do clube ----------
-   Nível 1→2: 100 XP. Nível 2→3: 300 XP (3×). Daí em diante duplica sempre
-   (3→4: 600, 4→5: 1200, …). Uma curva de grind longa e deliberada. */
-export const XP_WIN = 3;
-export const XP_DRAW = 1;
+/* ---------- Reputação do clube (nível) ---------- */
+export const XP_WIN = 12;
+export const XP_DRAW = 5;
+export const XP_LOSS = 2;
 export const MAX_LEVEL = 30;
-export const xpForNext = (level) => (level <= 1 ? 100 : 300 * Math.pow(2, level - 2));
+export const xpForNext = (level) => Math.round(400 * Math.pow(level, 1.8));
 
-// As taças são por nível exato do clube (como no 11x11) — não há escalões nem liga.
+/* As taças agrupam clubes por escalão (cada 3 níveis). */
+export const cupTierOf = (level) => Math.ceil(level / 3);
 
 /* ---------- Tempo real (o jogo é online: não há "avançar dia") ---------- */
 export const CUP_SIZE = 8;                       // 8 managers → Quartos, Meias, Final
-export const CUP_EVERY_MS = 10 * 60 * 1000;      // abre uma taça nova a cada 10 minutos
+export const CUP_EVERY_MS = 30 * 60 * 1000;      // abre uma taça nova a cada 30 minutos
 export const CUP_ROUND_MS = 5 * 60 * 1000;       // cada ronda joga-se 5 minutos depois da anterior
 export const CUP_UPCOMING = 3;                   // taças futuras visíveis para inscrição
-export const cupEntryFee = (level) => 25 + level * 15;
-export const cupPrize = (level) => Math.round((300 + level * 180) * (1 + level * 0.05));
-export const cupRunnerUp = (level) => Math.round(cupPrize(level) * 0.35);
+export const cupEntryFee = (tier) => 40 + tier * 45;
+export const cupPrize = (tier) => Math.round((500 + tier * 520) * (1 + tier * 0.12));
+export const cupRunnerUp = (tier) => Math.round(cupPrize(tier) * 0.35);
 
 export const CUP_REG_WINDOW_MS = 4 * 60 * 1000;     // 4 minutos para registares a equipa em cada jogo
 // (se todos os jogos da ronda estiverem feitos, a seguinte abre IMEDIATAMENTE — sem espera)
@@ -174,27 +183,28 @@ export const lastAgeBoundary = (now) => AGE_EPOCH + Math.floor((now - AGE_EPOCH)
 export const nextAgeBoundary = (now) => lastAgeBoundary(now) + AGE_MS;
 export const FITNESS_REGEN_PER_MIN = 0.6;           // recupera de um jogo em ~40 min
 
-/* Experiência de jogo: os jogadores GANHAM XP ao jogar, consoante o talento
-   (mais talento = mais XP por jogo), e o TREINADOR distribui esse XP pelos
-   atributos que quiser (ver trainCost acima). Taças dão XP a dobrar (como o
-   "Player's Experience: 200%" do 11x11). */
-export const MATCH_XP_BASE = 6;                     // XP base por jogo (antes dos multiplicadores)
-export const MATCH_XP_MULT = { taca: 2, amigavel: 0.6 };
+/* Evolução ganha por jogo, antes dos multiplicadores de idade e margem. */
+export const MATCH_XP_BASE = 5;
+export const MATCH_XP_MULT = { liga: 1.2, taca: 1.4, amigavel: 0.5 };
 
-/* ---------- Economia (DIFÍCIL: o dinheiro é o bem mais essencial) ----------
-   Sem salários, mas os prémios são magros e a bilheteira vale 1€ por adepto
-   PRESENTE (limitado pela capacidade do estádio, que começa em 0 lugares). */
+/* ---------- Economia: valores, salários e contratos ---------- */
 export const STARTING_MONEY = 2500;
 export const REWARD_WIN_BASE = 120;
 export const REWARD_DRAW_BASE = 45;
 export const REWARD_LOSS_BASE = 15;
 export const REWARD_WIN_PER_LEVEL = 25;
 export const FRIENDLY_REWARD_MULT = 0.5;
-// Preço estilo 11x11 (skill 76, 35 anos, talento 3 → ~1.5k).
+const POS_DEMAND = { GR: 0.85, DF: 0.95, MD: 1, AV: 1.2 };
 export const playerValue = (p) => {
-  const ageF = p.age <= 21 ? 1.6 : p.age <= 25 ? 1.35 : p.age <= 29 ? 1.1 : p.age <= 32 ? 0.85 : 0.65;
-  return Math.round((totalSkill(p) * 20 + p.talent * 150) * ageF);
+  const ovr = overallBase(p);
+  const ageF = p.age <= 21 ? 1.35 : p.age <= 25 ? 1.2 : p.age <= 29 ? 1 : p.age <= 32 ? 0.7 : 0.45;
+  const room = 1 + Math.max(0, (p.pot ?? ovr) - ovr) * 0.012;
+  const expiring = (p.contract ?? 3) <= 1 ? 0.8 : 1;
+  return Math.max(100, Math.round((2000 * Math.pow(1.09, ovr - 50) * ageF * room * POS_DEMAND[lineOf(p.pos)] * expiring) / 50) * 50);
 };
+export const wagePerDay = (p) => Math.max(4, Math.round(playerValue({ ...p, contract: 3 }) * 0.004));
+export const renewCost = (p) => Math.round(playerValue({ ...p, contract: 3 }) * 0.08);
+export const PAY_EVERY_MS = 24 * HOUR_MS;
 
 /* ---------- Energia / moral ---------- */
 export const FITNESS_MATCH_COST = 22;
@@ -206,9 +216,9 @@ export const moraleFactor = (m) => 0.92 + 0.16 * Math.min(100, Math.max(0, m)) /
    bilheteira é 1€ por adepto presente: min(lugares, adeptos) por jogo em casa. */
 export const BUILDINGS = {
   estadio: { label: "Estádio", desc: "+100 lugares por nível — 1€ por adepto presente nos jogos em casa.", max: 10 },
-  treino: { label: "Centro de Treino", desc: "Acelera o treino diário dos jogadores.", max: 10 },
+  treino: { label: "Centro de Treino", desc: "Os jogadores evoluem mais depressa a jogar.", max: 10 },
   medico: { label: "Dep. Médico", desc: "Menos lesões e recuperação mais rápida.", max: 10 },
-  academia: { label: "Academia", desc: "Gera jovens promessas (melhor talento a nível alto).", max: 10 },
+  academia: { label: "Academia", desc: "Revela jovens promessas, melhores a nível alto.", max: 10 },
 };
 export const buildingCost = (lvl) => Math.round(500 * Math.pow(1.8, lvl - 1));
 export const STADIUM_SEATS_PER_LEVEL = 100;
@@ -218,16 +228,12 @@ export const gateIncome = (stadiumLvl, fans) => Math.round(Math.min(stadiumCapac
 
 /* ---------- Boosters ---------- */
 export const BOOSTERS = {
-  energia: { label: "Energético", desc: "Restaura a energia de todo o plantel.", price: 400, icon: "⚡" },
-  moral: { label: "Motivador", desc: "+18 de moral imediata.", price: 300, icon: "🔥" },
-  treino: { label: "Treino Intensivo", desc: "Experiência de jogo a dobrar durante 2 horas.", price: 350, icon: "🎯" },
+  energia: { label: "Recuperação", desc: "Repõe a energia de todo o plantel.", price: 400, icon: "⚡" },
+  moral: { label: "Palestra", desc: "+18 de moral imediata.", price: 300, icon: "🔥" },
+  olheiro: { label: "Rede de olheiros", desc: "3 agentes livres novos agora.", price: 450, icon: "🔭" },
 };
-export const TRAIN_BOOST_MS = 2 * HOUR_MS;
 
-/* ---------- Mundo / mercado ----------
-   AGENTES LIVRES desde o nível 1: cada treinador tem a sua própria torneira
-   de 3 jogadores aleatórios por dia, compráveis logo (não pertencem a
-   treinadores reais). VENDER no mercado só a partir do nível 3. */
+/* ---------- Mercado ---------- */
 export const SQUAD_CAP = 26;
 export const SQUAD_MIN = 13;
 export const MARKET_UNLOCK_LEVEL = 3;

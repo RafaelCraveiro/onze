@@ -40,8 +40,10 @@ export const apiProfile = (clubName) => call("GET", `/api/profile/${encodeURICom
 export const apiSetLineup = (formation, starters) => call("POST", "/api/lineup", { formation, starters });
 export const apiSetStyle = (style) => call("POST", "/api/tactics", { style });
 
-// distribuição manual de XP: sobe UM atributo de UM jogador (custa XP banked dele)
-export const apiTrain = (playerId, skill) => call("POST", `/api/squad/${playerId}/train`, { skill });
+export const apiFocus = (playerId, focus) => call("POST", `/api/squad/${playerId}/focus`, { focus });
+export const apiRenew = (playerId) => call("POST", `/api/squad/${playerId}/renew`);
+export const apiLeague = () => call("GET", "/api/league");
+export const apiLeagueMatch = (round) => call("GET", `/api/league/match/${round}`);
 
 export const apiBuy = (listingId) => call("POST", "/api/market/buy", { listingId });
 export const apiSell = (playerId, price) => call("POST", "/api/market/sell", { playerId, price });
@@ -72,8 +74,8 @@ export const API_ERROR_PT = {
   "nivel-maximo": "Já está no nível máximo.",
   "ja-ativo": "Já está ativo.",
   "atributo-invalido": "Atributo inválido.",
-  "teto-atingido": "Este atributo já está no teto (25).",
-  "xp-insuficiente": "Não tens XP suficiente para este jogador.",
+  "contrato-maximo": "O contrato já está no máximo.",
+  "jogo-indisponivel": "Este jogo já não está disponível.",
   "perfil-inexistente": "Esse manager não existe (ou é um bot).",
   "listagem-inexistente": "Essa listagem já não está disponível.",
   "listagem-indisponivel": "O vendedor já não pode vender este jogador (plantel no mínimo).",

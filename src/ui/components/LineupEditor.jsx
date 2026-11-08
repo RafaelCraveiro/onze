@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Btn, PosBadge } from "./bits.jsx";
-import { FORMATIONS, STYLES, overallAt, overallBase } from "../../engine/constants.js";
+import { FORMATIONS, STYLES, POS_LABEL, overallAt, overallBase } from "../../engine/constants.js";
 import { isAvailable } from "../../engine/team.js";
 import { overallColor } from "../helpers.js";
 
@@ -31,31 +31,31 @@ export default function LineupEditor({ game, actions, compact = false }) {
           <button
             key={f}
             onClick={() => actions.setFormation(f)}
-            className={`rounded-md px-2.5 py-1 text-xs font-bold ${formation === f ? "btn-green" : "border border-[#c9cdb6] bg-white hover:bg-[#f4f5ec]"}`}
+            className={`rounded-md px-2.5 py-1 text-xs font-bold ${formation === f ? "btn-green" : "bg-[var(--s2)] text-[var(--t2)] hover:bg-[var(--s3)]"}`}
           >
             {f}
           </button>
         ))}
-        <span className="mx-1 text-[#d9dcc8]">|</span>
+        <span className="mx-1 text-[var(--t3)]">|</span>
         {Object.entries(STYLES).map(([k, s]) => (
           <button
             key={k}
             onClick={() => actions.setStyle(k)}
-            className={`rounded-md px-2.5 py-1 text-xs font-semibold ${game.tacticStyle === k ? "bg-[#2563eb] text-white" : "border border-[#c9cdb6] bg-white hover:bg-[#f4f5ec]"}`}
+            className={`rounded-md px-2.5 py-1 text-xs font-semibold ${game.tacticStyle === k ? "bg-[var(--info)] text-[#07182b] font-bold" : "bg-[var(--s2)] text-[var(--t2)] hover:bg-[var(--s3)]"}`}
           >
             {s.label}
           </button>
         ))}
-        <span className="ml-auto text-xs text-[#8a9077]">
+        <span className="ml-auto text-xs text-[var(--t3)]">
           Força do onze: <b style={{ color: overallColor(avg) }}>{avg}</b>
         </span>
         <Btn kind="dark" className="!py-1 text-xs" onClick={actions.autoXI}>Auto-onze</Btn>
       </div>
-      {STYLES[game.tacticStyle] && <p className="mb-2 text-xs text-[#6f7560]"><b>{STYLES[game.tacticStyle].label}:</b> {STYLES[game.tacticStyle].desc}</p>}
+      {STYLES[game.tacticStyle] && <p className="mb-2 text-xs text-[var(--t2)]"><b>{STYLES[game.tacticStyle].label}:</b> {STYLES[game.tacticStyle].desc}</p>}
 
       {/* mini-campo vertical */}
       <div
-        className={`relative mx-auto w-full rounded-xl border-2 border-[#3e7a1c] bg-gradient-to-b from-[#4e9b23] to-[#3d7d17] ${compact ? "max-w-xs" : "max-w-sm"}`}
+        className={`relative mx-auto w-full rounded-xl border border-[var(--line)] bg-gradient-to-b from-[#143f2d] to-[#0e3023] ${compact ? "max-w-xs" : "max-w-sm"}`}
         style={{ aspectRatio: "3/4" }}
       >
         <div className="absolute inset-x-8 top-0 h-14 rounded-b-lg border border-t-0 border-white/40" />
@@ -72,13 +72,13 @@ export default function LineupEditor({ game, actions, compact = false }) {
               style={{ left: `${wide * 100}%`, top: `${92 - adv * 118}%` }}
             >
               <span
-                className={`flex h-9 w-9 items-center justify-center rounded-full border-2 bg-white text-xs font-black shadow ${missing ? "border-[#c0392b]" : selSlot === i ? "border-[#dfa112]" : "border-[#3a4030]/40"}`}
-                style={{ color: p ? overallColor(overallAt(p, pos)) : "#c0392b" }}
+                className={`flex h-9 w-9 items-center justify-center rounded-full border-2 bg-[var(--surface)] text-xs font-black ${missing ? "border-[var(--danger)]" : selSlot === i ? "border-[var(--gold)]" : "border-[var(--t2)]/40"}`}
+                style={{ color: p ? overallColor(overallAt(p, pos)) : "#ff6b6f" }}
               >
                 {p ? overallAt(p, pos) : "—"}
               </span>
               <span className="mt-0.5 max-w-[74px] truncate rounded bg-black/45 px-1 text-[9px] font-semibold text-white">
-                {pos} · {p ? p.name.split(" ").pop() : "vazio"}
+                {POS_LABEL[pos]} · {p ? p.name.split(" ").pop() : "vazio"}
               </span>
             </button>
           );
@@ -87,8 +87,8 @@ export default function LineupEditor({ game, actions, compact = false }) {
 
       {selSlot !== null && (
         <div className="onze-pop box-cream mt-2 rounded-lg p-2">
-          <p className="mb-1 text-xs font-bold text-[#a07407]">
-            Escolher jogador para {slots[selSlot][0]} (posição {selSlot + 1}):
+          <p className="mb-1 text-xs font-bold text-[var(--gold)]">
+            Escolher jogador para {POS_LABEL[slots[selSlot][0]]}:
           </p>
           <div className="flex max-h-40 flex-col gap-1 overflow-y-auto">
             {[...game.players]
@@ -102,13 +102,13 @@ export default function LineupEditor({ game, actions, compact = false }) {
                     key={p.id}
                     disabled={unavailable}
                     onClick={() => pickFor(selSlot, p.id)}
-                    className="flex items-center gap-2 rounded-md border border-[#e6e8da] bg-white px-2 py-1 text-left text-sm hover:bg-[#f4f5ec] disabled:opacity-40"
+                    className="flex items-center gap-2 rounded-md border border-[var(--line)] bg-[var(--surface)] px-2 py-1 text-left text-sm hover:bg-[var(--s2)] disabled:opacity-40"
                   >
                     <span>{p.flag}</span>
                     <PosBadge pos={p.pos} />
                     <span className="min-w-0 flex-1 truncate">{p.name}</span>
-                    {inXI && <span className="text-[10px] text-[#2563eb]">no onze (troca)</span>}
-                    {unavailable && <span className="text-[10px] text-[#c0392b]">{(p.injuryMin ?? 0) > 0 ? "lesionado" : "castigado"}</span>}
+                    {inXI && <span className="text-[10px] text-[var(--info)]">no onze (troca)</span>}
+                    {unavailable && <span className="text-[10px] text-[var(--danger)]">{(p.injuryMin ?? 0) > 0 ? "lesionado" : "castigado"}</span>}
                     <b style={{ color: overallColor(overallAt(p, slots[selSlot][0])) }}>{overallAt(p, slots[selSlot][0])}</b>
                   </button>
                 );
@@ -124,8 +124,8 @@ export default function LineupEditor({ game, actions, compact = false }) {
             .sort((a, b) => overallBase(b) - overallBase(a))
             .slice(0, 10)
             .map((p) => (
-              <span key={p.id} className={`rounded-md border border-[#e6e8da] bg-[#f7f8f1] px-2 py-1 text-xs ${!isAvailable(p) ? "opacity-40" : ""}`}>
-                {p.pos} · {p.name.split(" ").pop()} <b style={{ color: overallColor(overallBase(p)) }}>{overallBase(p)}</b>
+              <span key={p.id} className={`rounded-md border border-[var(--line)] bg-[var(--s2)] px-2 py-1 text-xs ${!isAvailable(p) ? "opacity-40" : ""}`}>
+                {POS_LABEL[p.pos]} · {p.name.split(" ").pop()} <b style={{ color: overallColor(overallBase(p)) }}>{overallBase(p)}</b>
               </span>
             ))}
         </div>

@@ -12,7 +12,7 @@ export default function MatchView({ game, actions, onDone }) {
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 p-3">
       <div className="flex items-center justify-between">
         <Pill color="#2563eb">{KIND_LABEL[live.kind]}</Pill>
-        <p className="text-xs text-[#8a9077]">adversário: @{live.opp.user} · nível {live.opp.level}</p>
+        <p className="text-xs text-[var(--t3)]">adversário: @{live.opp.user} · nível {live.opp.level}</p>
       </div>
       <MatchViewer2D
         live={live}

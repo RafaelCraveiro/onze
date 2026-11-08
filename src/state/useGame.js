@@ -10,7 +10,7 @@ import { autoPickXI } from "../engine/team.js";
 import { buildTimeline } from "../engine/timeline.js";
 import {
   getToken, setToken, apiRegister, apiLogin, apiLogout, apiState,
-  apiSetLineup, apiSetStyle, apiTrain,
+  apiSetLineup, apiSetStyle, apiFocus, apiRenew, apiLeague, apiLeagueMatch,
   apiBuy, apiSell, apiCancelSale, apiRelease, apiUpgrade, apiBooster, apiFriendly,
   apiTransfers, apiBuyTransfer,
   errPt,
@@ -59,6 +59,12 @@ export const useGame = () => {
       setGame((g) => (g ? { ...g, cups } : g));
     } catch { /* silencioso */ }
   };
+  const refreshLeague = async () => {
+    try {
+      const { league } = await apiLeague();
+      setGame((g) => (g ? { ...g, league } : g));
+    } catch { /* silencioso */ }
+  };
   const refreshTransfers = async (pos) => {
     try {
       const { transfers } = await apiTransfers(pos);
@@ -71,9 +77,11 @@ export const useGame = () => {
     if (auth.status !== "authed") return;
     refreshState();
     refreshCups();
+    refreshLeague();
+    const l = setInterval(() => { if (!gameRef.current?.live) refreshLeague(); }, 30000);
     const s = setInterval(() => { if (!gameRef.current?.live) refreshState(); }, 12000);
     const c = setInterval(() => { if (!gameRef.current?.live) refreshCups(); }, 8000);
-    return () => { clearInterval(s); clearInterval(c); };
+    return () => { clearInterval(s); clearInterval(c); clearInterval(l); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auth.status]);
 
@@ -234,8 +242,19 @@ export const useGame = () => {
     upgradeBuilding: (key) => runEconomic(() => apiUpgrade(key)),
     buyBooster: (key) => runEconomic(() => apiBooster(key)),
 
-    /* ---------- Evolução: distribuição manual de XP ---------- */
-    trainSkill: (playerId, skill) => runEconomic(() => apiTrain(playerId, skill)),
+    /* ---------- Jogadores ---------- */
+    setFocus: (playerId, focus) => runEconomic(() => apiFocus(playerId, focus)),
+    renewPlayer: (playerId) => runEconomic(() => apiRenew(playerId)),
+
+    /* ---------- Liga ---------- */
+    refreshLeague,
+    watchLeagueMatch: async (round) => {
+      if (gameRef.current?.live) return;
+      try {
+        const out = await apiLeagueMatch(round);
+        setGame((g) => (g ? { ...g, live: { kind: "liga", isHome: out.isHome, userSide: out.isHome ? "H" : "A", opp: out.opp, result: out.result, timeline: buildTimeline(out.result) } } : g));
+      } catch (e) { flash(errPt(e), "erro"); }
+    },
 
     dismissNotice: () => setNotice(null),
   };

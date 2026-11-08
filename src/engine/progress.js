@@ -1,14 +1,10 @@
-/* Progressão: XP/nível do clube, aplicação de resultados, EVOLUÇÃO POR JOGO.
-   O jogo é online — não há dias: notícias e histórico usam timestamps reais.
-   Os jogadores GANHAM XP ao jogar (mais talento = mais XP por jogo) e o
-   treinador distribui manualmente esse XP pelos atributos (ver trainCost em
-   constants.js e trainSkill em server/club.mjs) — não há treino automático. */
+/* Progressão: reputação do clube, resultados e evolução automática dos jogadores. */
 
 import {
-  XP_WIN, XP_DRAW, MAX_LEVEL, xpForNext,
+  XP_WIN, XP_DRAW, XP_LOSS, MAX_LEVEL, xpForNext, SKILLS, SKILL_CAP, RATING_WEIGHTS, lineOf, overallBase, growthCost,
   REWARD_WIN_BASE, REWARD_DRAW_BASE, REWARD_LOSS_BASE, REWARD_WIN_PER_LEVEL, FRIENDLY_REWARD_MULT,
   FITNESS_MATCH_COST, gateIncome, INBOX_CAP, HISTORY_CAP,
-  MATCH_XP_BASE, MATCH_XP_MULT, talentGrowth,
+  MATCH_XP_BASE, MATCH_XP_MULT,
 } from "./constants.js";
 
 export const pushNews = (game, type, title, text, at = Date.now()) => {
@@ -16,7 +12,7 @@ export const pushNews = (game, type, title, text, at = Date.now()) => {
   if (game.inbox.length > INBOX_CAP) game.inbox.length = INBOX_CAP;
 };
 
-/* Vitória +3 XP, empate +1 — devolve níveis ganhos. */
+/* Soma reputação e devolve os níveis ganhos. */
 export const applyClubXp = (game, xp) => {
   const c = game.club;
   c.xp += xp;
@@ -27,19 +23,37 @@ export const applyClubXp = (game, xp) => {
     c.level++;
     ups++;
   }
-  if (ups > 0) pushNews(game, "level", `Nível ${c.level}!`, `O clube subiu para o nível ${c.level}. As próximas taças já serão do teu novo nível.`);
+  if (ups > 0) pushNews(game, "level", `Nível ${c.level}!`, `O clube subiu para o nível ${c.level}. A reputação do clube continua a crescer.`);
   return ups;
 };
 
-/* XP de treino ganho por UM jogador num jogo (banked — o treinador gasta-o depois). */
-const matchTrainingXp = (p, kind, boosted) => {
-  const ageMult = p.age <= 20 ? 1.35 : p.age <= 24 ? 1.05 : p.age <= 28 ? 0.75 : 0.35;
-  const xp = MATCH_XP_BASE * (MATCH_XP_MULT[kind] ?? 1) * talentGrowth(p.talent) * ageMult * (boosted ? 2 : 1);
-  return Math.max(1, Math.round(xp));
+/* Evolução ganha por UM jogador num jogo: novos e com margem aprendem mais. */
+const matchGrowth = (p, kind, trainLvl) => {
+  const ageMult = p.age <= 21 ? 1.3 : p.age <= 25 ? 1 : p.age <= 29 ? 0.6 : 0.25;
+  const room = Math.min(1.25, 0.55 + Math.max(0, (p.pot ?? 0) - overallBase(p)) * 0.05);
+  return MATCH_XP_BASE * (MATCH_XP_MULT[kind] ?? 1) * ageMult * room * (1 + trainLvl * 0.06);
+};
+
+/* Converte a evolução acumulada em atributos, sem passar o potencial. Devolve true se subiu de qualidade. */
+export const growPlayer = (p) => {
+  const before = overallBase(p);
+  if (before >= (p.pot ?? 0)) { p.trainingXp = 0; return false; }
+  const w = RATING_WEIGHTS[lineOf(p.pos)];
+  const auto = () => SKILLS.filter((k) => w[k] > 0 && p.skills[k] < SKILL_CAP).sort((a, b) => (p.skills[a] / w[a]) - (p.skills[b] / w[b]))[0];
+  for (let guard = 0; guard < 8; guard++) {
+    const attr = p.focus && p.skills[p.focus] < SKILL_CAP ? p.focus : auto();
+    if (!attr) break;
+    const cost = growthCost(p.skills[attr]);
+    if ((p.trainingXp ?? 0) < cost) break;
+    p.trainingXp -= cost;
+    p.skills[attr] += 1;
+    if (overallBase(p) >= p.pot) { p.trainingXp = 0; break; }
+  }
+  return overallBase(p) > before;
 };
 
 /* Aplica um resultado do utilizador ao estado (XP, dinheiro, energia, evolução…).
-   kind: "amigavel" | "taca". MUTA o game (chamar sobre uma cópia). */
+   kind: "amigavel" | "taca" | "liga". MUTA o game (chamar sobre uma cópia). */
 export const applyUserResult = (game, { kind, userSide, result, oppName, isHome, auto = false, forfeit = false }) => {
   const now = Date.now();
   const [gh, ga] = result.score;
@@ -48,15 +62,17 @@ export const applyUserResult = (game, { kind, userSide, result, oppName, isHome,
   const outcome = gU > gO ? "V" : gU < gO ? "D" : "E";
   const competitive = kind !== "amigavel";
 
-  // XP do clube — TODAS as vitórias dão 3, empates 1 (como no 11x11)
-  applyClubXp(game, outcome === "V" ? XP_WIN : outcome === "E" ? XP_DRAW : 0);
+  // reputação: os jogos oficiais valem mais
+  const repMult = kind === "liga" ? 1.5 : kind === "taca" ? 1.25 : 1;
+  applyClubXp(game, Math.round((outcome === "V" ? XP_WIN : outcome === "E" ? XP_DRAW : XP_LOSS) * repMult));
 
-  // Dinheiro (sem salários — o rendimento vem dos jogos, prémios e vendas)
+  // Dinheiro do jogo
   // Falta de comparência: nem prémio de jogo nem bilheteira.
   let reward = 0, tickets = 0;
   if (!forfeit) {
     reward = outcome === "V" ? REWARD_WIN_BASE + game.club.level * REWARD_WIN_PER_LEVEL : outcome === "E" ? REWARD_DRAW_BASE : REWARD_LOSS_BASE;
     if (kind === "amigavel") reward = Math.round(reward * FRIENDLY_REWARD_MULT);
+    if (kind === "liga") reward = Math.round(reward * 1.4);
     // bilheteira: 1€ por adepto PRESENTE — limitado pelos lugares do estádio (começa em 0)
     if (isHome) tickets = Math.round(gateIncome(game.club.buildings.estadio, game.club.fans ?? 0) * (kind === "amigavel" ? 0.5 : 1));
     game.club.money += reward + tickets;
@@ -66,7 +82,7 @@ export const applyUserResult = (game, { kind, userSide, result, oppName, isHome,
   game.club.morale = Math.max(5, Math.min(100, game.club.morale + (outcome === "V" ? 6 : outcome === "E" ? -1 : -7)));
   game.club.fans = Math.max(0, (game.club.fans ?? 100) + (outcome === "V" ? 18 + game.club.level * 6 : outcome === "E" ? 5 : -8));
 
-  // Jogadores: energia, estatísticas, lesões, castigos e XP DE TREINO GANHO
+  // Jogadores: energia, estatísticas, lesões, castigos e evolução
   const xiIds = new Set((userSide === "H" ? result.homeXI : result.awayXI).map((x) => x.id));
   const userEvents = result.events.filter((e) => e.side === userSide);
   const goalsBy = {}, assistsBy = {};
@@ -81,9 +97,9 @@ export const applyUserResult = (game, { kind, userSide, result, oppName, isHome,
   const suspended = {};
   for (const s of result.suspensions) if (s.side === userSide) suspended[s.pid] = s.matches;
 
-  const boosted = (game.flags?.trainBoostUntil ?? 0) > now;
   const moraleDelta = outcome === "V" ? 8 : outcome === "E" ? 3 : -6;
   let xpGained = 0;
+  const improved = [];
   for (const p of game.players) {
     if (competitive && p.suspension > 0 && !xiIds.has(p.id)) p.suspension--; // cumpriu jogo de castigo
     if (!xiIds.has(p.id)) continue;
@@ -92,9 +108,10 @@ export const applyUserResult = (game, { kind, userSide, result, oppName, isHome,
     p.stats.games++;
     p.stats.goals += goalsBy[p.id] ?? 0;
     p.stats.assists += assistsBy[p.id] ?? 0;
-    const xp = matchTrainingXp(p, kind, boosted);
+    const xp = matchGrowth(p, kind, game.club.buildings.treino ?? 1);
     p.trainingXp = (p.trainingXp ?? 0) + xp;
     xpGained += xp;
+    if (growPlayer(p)) improved.push(`${p.name} (${overallBase(p)})`);
     if (injuredMin[p.id]) {
       p.injuryMin = injuredMin[p.id];
       pushNews(game, "injury", "Lesão", `${p.name} lesionou-se — volta dentro de ${fmtDur(p.injuryMin)}.`);
@@ -104,6 +121,8 @@ export const applyUserResult = (game, { kind, userSide, result, oppName, isHome,
       pushNews(game, "card", "Expulsão", `${p.name} foi expulso — falha ${p.suspension} jogo(s) oficial(is).`);
     }
   }
+
+  if (improved.length) pushNews(game, "squad", "Evolução", `Subiram de qualidade: ${improved.join(", ")}.`);
 
   // Registo da conta e histórico
   const acc = game.account;

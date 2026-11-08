@@ -1,23 +1,12 @@
-/* Geração de jogadores (sub-habilidades estilo 11x11), plantéis, emblemas e mundo. */
+/* Geração de jogadores, plantéis, emblemas e bots. */
 
 import {
-  INITIAL_TALENT_WEIGHTS, academyTalentWeights, talentCap,
-  RATING_WEIGHTS, SKILLS, lineOf,
+  RATING_WEIGHTS, SKILLS, TRAITS, lineOf, overallBase,
 } from "./constants.js";
 import { playerIdentity, mulberry32, pickFrom } from "./names.js";
 
 let nextId = 1;
 export const newId = () => `p${Date.now().toString(36)}${(nextId++).toString(36)}`;
-
-export const weightedPick = (rng, weights) => {
-  const total = weights.reduce((s, [, w]) => s + w, 0);
-  let r = rng() * total;
-  for (const [v, w] of weights) {
-    r -= w;
-    if (r <= 0) return v;
-  }
-  return weights[weights.length - 1][0];
-};
 
 /* ---------- Emblemas ---------- */
 export const EMBLEM_SHAPES = ["escudo", "redondo", "circulo", "losango"];
@@ -36,63 +25,69 @@ export const randomEmblem = (rng) => ({
   c2: pickFrom(rng, EMBLEM_COLORS),
 });
 
-/* ---------- Sub-habilidades ----------
-   totalTarget: Skl alvo (soma das 8). Por omissão distribui com o viés da
-   posição (RATING_WEIGHTS); com random=true a distribuição é totalmente
-   ALEATÓRIA (plantel inicial: os atributos podem calhar bem ou mal — cabe ao
-   treinador corrigi-los com o XP de treino). Teto SKILL_CAP em ambos. */
-export const genSubskills = (rng, pos, totalTarget, talent, { random = false } = {}) => {
-  const bias = RATING_WEIGHTS[lineOf(pos)];
-  const cap = talentCap(talent);
-  const weights = SKILLS.map((s) => (random ? 0.4 + rng() * 1.6 : bias[s] * (0.75 + rng() * 0.5)));
-  const wSum = weights.reduce((a, b) => a + b, 0);
-  const skills = {};
-  for (let i = 0; i < SKILLS.length; i++) {
-    skills[SKILLS[i]] = Math.max(1, Math.min(cap, Math.round((totalTarget * weights[i]) / wSum)));
+/* ---------- Atributos: os importantes para a posição ficam perto do alvo ---------- */
+export const genAttrs = (rng, pos, target) => {
+  const w = RATING_WEIGHTS[lineOf(pos)];
+  const attrs = {};
+  for (const k of SKILLS) {
+    const v = w[k] >= 0.2 ? target + (rng() - 0.5) * 12
+      : w[k] > 0 ? target * 0.78 + (rng() - 0.5) * 14
+      : 6 + rng() * 16;
+    attrs[k] = Math.round(Math.max(1, Math.min(99, v)));
   }
-  return skills;
+  // acerta o conjunto para o valor global ficar no alvo
+  const gap = target - overallBase({ pos, skills: attrs });
+  for (const k of SKILLS) if (w[k] > 0) attrs[k] = Math.round(Math.max(1, Math.min(99, attrs[k] + gap)));
+  return attrs;
+};
+
+const rollTraits = (rng, pos) => {
+  const pool = Object.entries(TRAITS).filter(([, t]) => t.lines.includes(lineOf(pos))).map(([k]) => k);
+  const out = [];
+  if (rng() < 0.42) out.push(pickFrom(rng, pool));
+  if (rng() < 0.12) { const t = pickFrom(rng, pool); if (!out.includes(t)) out.push(t); }
+  return out;
+};
+
+const rollPotential = (rng, age, ovr) => {
+  const room = age <= 19 ? 26 : age <= 22 ? 16 : age <= 26 ? 7 : 2;
+  let gap = rng() * room;
+  if (age <= 23 && rng() < 0.04) gap += 12 + rng() * 10; // joia rara
+  return Math.round(Math.min(97, ovr + gap));
 };
 
 /* ---------- Jogadores ---------- */
-export const genPlayer = (rng, pos, { talentWeights = INITIAL_TALENT_WEIGHTS, skillLevel = 80, ageMin = 18, ageMax = 35, randomSkills = false } = {}) => {
-  const talent = weightedPick(rng, talentWeights);
+export const genPlayer = (rng, pos, { ovr = 48, spread = 12, ageMin = 18, ageMax = 34 } = {}) => {
   const age = ageMin + Math.floor(rng() * (ageMax - ageMin + 1));
-  const total = Math.max(45, Math.round(skillLevel + (rng() - 0.5) * 40));
+  const skills = genAttrs(rng, pos, Math.max(20, Math.round(ovr + (rng() - 0.5) * spread)));
   const id = playerIdentity(rng);
-  return {
+  const p = {
     id: newId(), name: id.name, nat: id.nat, flag: id.flag,
-    pos, age, talent,
-    skills: genSubskills(rng, pos, total, talent, { random: randomSkills }),
-    fitness: 100, morale: 0, injuryMin: 0, suspension: 0,
+    pos, age, skills, pot: 0, traits: rollTraits(rng, pos), focus: null,
+    contract: 2 + Math.floor(rng() * 3),
+    fitness: 100, morale: 50, injuryMin: 0, suspension: 0,
     stats: { games: 0, goals: 0, assists: 0 },
   };
+  p.pot = rollPotential(rng, age, overallBase(p));
+  return p;
 };
 
-/* Plantel inicial: 18 jogadores (3 Gk), Skl ~60–106 como no 11x11, sorte
-   ocasional de um talento 7. Atributos SEM viés de posição — tudo aleatório
-   dentro do normal; distribuí-los bem é trabalho do treinador. */
+/* Plantel inicial: 20 jogadores equilibrados por setor. */
 export const genInitialSquad = (rng) => {
-  const plan = ["Gk", "Gk", "Gk", "Ld", "Cd", "Cd", "Rd", "Lm", "Cm", "Cm", "Rm", "Lf", "Cf", "Cf", "Rf", "Cd", "Cm", "Cf"];
-  return plan.map((pos) => genPlayer(rng, pos, { skillLevel: 82, randomSkills: true }));
+  const plan = ["Gk", "Gk", "Ld", "Ld", "Cd", "Cd", "Cd", "Rd", "Rd", "Lm", "Cm", "Cm", "Cm", "Rm", "Rm", "Lf", "Cf", "Cf", "Rf", "Cm"];
+  return plan.map((pos) => genPlayer(rng, pos, { ovr: 48, spread: 14 }));
 };
 
 export const genYouth = (rng, academyLvl) =>
-  genPlayer(rng, pickFrom(rng, ["Cd", "Lm", "Cm", "Rm", "Cf"]), {
-    talentWeights: academyTalentWeights(academyLvl),
-    skillLevel: 55 + academyLvl * 3, ageMin: 16, ageMax: 18,
-  });
+  genPlayer(rng, pickFrom(rng, ["Cd", "Lm", "Cm", "Rm", "Cf"]), { ovr: 34 + academyLvl * 2.2, spread: 8, ageMin: 16, ageMax: 18 });
 
-/* ---------- Bots ----------
-   Simplificados de propósito: não são "managers" com nome/emblema próprios —
-   são literalmente uma conta do sistema que joga os jogos sem adversário
-   real e fica com o troféu se ganhar a sério. Gerados na hora (sem pool
-   persistente), só precisam de força (derivada do nível) para simular. */
+/* ---------- Bots: uma conta do sistema, com força derivada do nível ---------- */
 export const BOT_EMBLEM = { shape: "circulo", pattern: "liso", symbol: "🤖", c1: "#64748b", c2: "#f8fafc" };
 
 export const genBot = (rng, level, label = "") => ({
   id: `bot-${Math.floor(rng() * 1e9).toString(36)}`,
   user: "Bot", team: label ? `Bot ${label}` : "Bot", emblem: BOT_EMBLEM,
-  level, str: Math.round(72 + level * 4.5 + (rng() - 0.5) * 16),
+  level, str: Math.round(42 + level * 2.6 + (rng() - 0.5) * 8),
 });
 
 /* XI sintético de um bot (determinístico por id+dia). */
@@ -100,29 +95,19 @@ export const botLineup = (bot, day) => {
   const rng = mulberry32((bot.id.charCodeAt(1) * 7919 + day * 131 + bot.level * 17) >>> 0);
   const plan = ["Gk", "Ld", "Cd", "Cd", "Rd", "Lm", "Cm", "Cm", "Rm", "Cf", "Cf"];
   return plan.map((pos, i) => {
-    const total = Math.max(45, Math.round(bot.str + (rng() - 0.5) * 20));
-    const talent = Math.min(9, 1 + Math.floor(bot.level / 3) + Math.floor(rng() * 3));
     const idn = playerIdentity(rng);
     return {
       id: `${bot.id}x${i}`, name: idn.name, nat: idn.nat, flag: idn.flag,
-      pos, age: 18 + Math.floor(rng() * 16), talent,
-      skills: genSubskills(rng, pos, total, Math.max(talent, 5)),
-      fitness: 88 + Math.floor(rng() * 12), morale: 20, injuryMin: 0, suspension: 0,
+      pos, age: 18 + Math.floor(rng() * 16), pot: 70, traits: [],
+      skills: genAttrs(rng, pos, Math.max(20, Math.round(bot.str + (rng() - 0.5) * 8))),
+      fitness: 88 + Math.floor(rng() * 12), morale: 55, injuryMin: 0, suspension: 0,
       stats: { games: 0, goals: 0, assists: 0 },
     };
   });
 };
 
-/* Jogador à venda no mercado (agente livre). Talento 7/8/9 muito raros —
-   crescem devagar com o nível de quem os vê, nunca dominam a lista. */
-export const genMarketPlayer = (rng, clubLevel) => {
-  const talentWeights = [
-    [1, 10], [2, 17], [3, 23], [4, 20], [5, 15], [6, 8],
-    [7, Math.max(1, Math.floor(clubLevel / 3))],
-    [8, Math.max(0, Math.floor((clubLevel - 6) / 3))],
-    [9, Math.max(0, Math.floor((clubLevel - 15) / 5))],
-  ];
-  return genPlayer(rng, pickFrom(rng, ["Gk", "Ld", "Cd", "Cd", "Rd", "Lm", "Cm", "Cm", "Rm", "Lf", "Cf", "Cf", "Rf"]), {
-    talentWeights, skillLevel: 72 + clubLevel * 5, ageMin: 17, ageMax: 33,
+/* Agente livre no mercado: qualidade cresce devagar com o nível do clube. */
+export const genMarketPlayer = (rng, clubLevel) =>
+  genPlayer(rng, pickFrom(rng, ["Gk", "Ld", "Cd", "Cd", "Rd", "Lm", "Cm", "Cm", "Rm", "Lf", "Cf", "Cf", "Rf"]), {
+    ovr: 47 + clubLevel * 1.8, spread: 12, ageMin: 17, ageMax: 33,
   });
-};

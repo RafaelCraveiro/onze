@@ -94,7 +94,7 @@ console.log("\n[4] Jogos reais do motor: variedade e fluidez");
   const { FORMATIONS } = await import("../src/engine/constants.js");
   const team = (formation, style) => {
     const slots = FORMATIONS[formation].map(([p]) => p);
-    return { name: "T", slots, style, morale: 70, bench: [], medicoLvl: 1, players: slots.map((pos, i) => ({ id: `${formation}${style}${i}`, name: `J${i}`, pos, fitness: 100, morale: 70, skills: { desarme: 10, marcacao: 10, drible: 10, controlo: 10, resistencia: 10, passe: 10, potencia: 10, precisao: 10 } })) };
+    return { name: "T", slots, style, morale: 70, bench: [], medicoLvl: 1, players: slots.map((pos, i) => ({ id: `${formation}${style}${i}`, name: `J${i}`, pos, fitness: 100, morale: 70, skills: { finalizacao: 40, criacao: 40, velocidade: 40, fisico: 40, defesa: 40, reflexos: 40 } })) };
   };
   const styles = ["equilibrado", "ofensivo", "defensivo", "posse", "pressao", "contra"];
   const forms = Object.keys(FORMATIONS);

@@ -12,6 +12,7 @@ import crypto from "node:crypto";
 import { openDatabase } from "./db.mjs";
 import { initCups, listCups, enroll, registerTeam, matchResultFor } from "./cups.mjs";
 import * as club from "./club.mjs";
+import * as league from "./league.mjs";
 import { synthBotNear } from "./world.mjs";
 import { simulateMatch } from "../src/engine/match.js";
 import { prepareBotTeam } from "../src/engine/team.js";
@@ -43,11 +44,12 @@ await db.exec(`
 
 await club.initClub(db);
 await initCups(db);
+await league.initLeague(db);
 
 /* O Supabase expõe as tabelas de "public" pela sua API REST. Este jogo só acede
    pelo servidor, por isso ativa-se RLS sem políticas: a API pública não lê nem
    escreve nada (contas e hashes incluídos); o servidor, dono das tabelas, continua. */
-await db.exec(["users", "sessions", "saves", "club", "players", "market", "meta", "world_clock", "cups", "cup_entrants", "cup_matches", "cup_regs"]
+await db.exec(["users", "sessions", "saves", "club", "players", "market", "meta", "world_clock", "cups", "cup_entrants", "cup_matches", "cup_regs", "leagues", "league_clubs", "league_fixtures", "league_memo"]
   .map((t) => `ALTER TABLE ${t} ENABLE ROW LEVEL SECURITY;`).join("\n"));
 
 const hashPass = (password, salt) => crypto.scryptSync(password, salt, 64).toString("hex");
@@ -64,7 +66,7 @@ app.use("/api", (req, res, next) => {
   db.tx(() => new Promise((resolve, reject) => {
     res.json = (body) => { resolve(body); return res; };
     req.failTx = reject;
-    club.ageWorldIfDue(Date.now()).then(() => next(), reject);
+    (async () => { const t = Date.now(); await club.ageWorldIfDue(t); await league.tickLeague(t); })().then(() => next(), reject);
   })).then(sendJson, (err) => {
     console.error("[api]", req.method, req.path, err);
     res.status(500);
@@ -161,9 +163,19 @@ app.post("/api/tactics", auth, async (req, res) => {
   reply(res, await club.setStyle(req.userId, String(req.body?.style ?? ""), Date.now()));
 });
 
-// distribuição manual de XP: sobe UM atributo de UM jogador, gastando o XP banked dele
-app.post("/api/squad/:id/train", auth, async (req, res) => {
-  reply(res, await club.trainSkill(req.userId, req.params.id, String(req.body?.skill ?? ""), Date.now()));
+app.post("/api/squad/:id/focus", auth, async (req, res) => {
+  reply(res, await club.setFocus(req.userId, req.params.id, req.body?.focus ?? null, Date.now()));
+});
+app.post("/api/squad/:id/renew", auth, async (req, res) => {
+  reply(res, await club.renewPlayer(req.userId, req.params.id, Date.now()));
+});
+
+/* ---------- liga ---------- */
+app.get("/api/league", auth, async (req, res) => {
+  res.json({ league: await league.leagueFor(req.userId, Date.now()) });
+});
+app.get("/api/league/match/:round", auth, async (req, res) => {
+  reply(res, await league.leagueMatch(req.userId, parseInt(req.params.round, 10) || 0, Date.now()));
 });
 
 app.post("/api/market/buy", auth, async (req, res) => {

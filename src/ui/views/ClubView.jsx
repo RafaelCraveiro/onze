@@ -14,13 +14,13 @@ export default function ClubView({ game, actions }) {
           <Emblem emblem={club.emblem} size={64} />
           <div className="flex-1">
             <p className="text-lg font-black">{club.name}</p>
-            <p className="text-xs text-[#8a9077]">conta online · criada a {fmtWhen(account.createdAt)}</p>
+            <p className="text-xs text-[var(--t3)]">conta online · criada a {fmtWhen(account.createdAt)}</p>
             <div className="mt-1 flex items-center gap-2">
               <Pill>Nível {club.level}</Pill>
               <div className="flex-1">
                 <Bar value={club.xp} max={xpForNext(club.level)} />
               </div>
-              <span className="font-mono text-xs text-[#8a9077]">{club.xp}/{xpForNext(club.level)} XP</span>
+              <span className="font-mono text-xs text-[var(--t3)]">{club.xp}/{xpForNext(club.level)} XP</span>
             </div>
           </div>
         </div>
@@ -39,16 +39,16 @@ export default function ClubView({ game, actions }) {
             const cost = buildingCost(lvl + 1);
             const maxed = lvl >= b.max;
             return (
-              <div key={key} className="rounded-lg border border-[#e6e8da] bg-[#fbfcf7] p-3">
+              <div key={key} className="rounded-lg border border-[var(--line)] bg-[var(--s2)] p-3">
                 <div className="flex items-center justify-between">
-                  <p className="font-bold">{b.label} <span className="text-xs font-normal text-[#8a9077]">nível {lvl}</span></p>
+                  <p className="font-bold">{b.label} <span className="text-xs font-normal text-[var(--t3)]">nível {lvl}</span></p>
                   <Btn kind="dark" disabled={maxed || club.money < cost} onClick={() => actions.upgradeBuilding(key)}>
                     {maxed ? "Máx." : fmtMoney(cost)}
                   </Btn>
                 </div>
-                <p className="mt-1 text-xs text-[#6b7261]">{b.desc}</p>
+                <p className="mt-1 text-xs text-[var(--t2)]">{b.desc}</p>
                 {key === "estadio" && (
-                  <p className="mt-0.5 text-[11px] font-semibold text-[#4f7a12]">
+                  <p className="mt-0.5 text-[11px] font-semibold text-[var(--green)]">
                     {stadiumCapacity(lvl).toLocaleString("pt-PT")} lugares · bilheteira: {fmtMoney(gateIncome(lvl, club.fans ?? 0))}/jogo em casa
                     {stadiumCapacity(lvl) > 0 && (club.fans ?? 0) >= stadiumCapacity(lvl) ? " (casa cheia!)" : ""}
                   </p>
@@ -60,14 +60,14 @@ export default function ClubView({ game, actions }) {
         </div>
       </Section>
 
-      <Section title="Boosters">
+      <Section title="Serviços do clube">
         <div className="grid gap-2 sm:grid-cols-3">
           {Object.entries(BOOSTERS).map(([key, b]) => (
-            <div key={key} className="flex flex-col rounded-lg border border-[#e6e8da] bg-[#fbfcf7] p-3">
+            <div key={key} className="flex flex-col rounded-lg border border-[var(--line)] bg-[var(--s2)] p-3">
               <p className="font-bold">{b.icon} {b.label}</p>
-              <p className="mb-2 flex-1 text-xs text-[#6b7261]">{b.desc}</p>
-              <Btn kind="gold" disabled={club.money < b.price || (key === "treino" && (game.flags?.trainBoostUntil ?? 0) > Date.now())} onClick={() => actions.buyBooster(key)}>
-                {key === "treino" && (game.flags?.trainBoostUntil ?? 0) > Date.now() ? `Ativo até ${fmtWhen(game.flags.trainBoostUntil)}` : fmtMoney(b.price)}
+              <p className="mb-2 flex-1 text-xs text-[var(--t2)]">{b.desc}</p>
+              <Btn kind="gold" disabled={club.money < b.price} onClick={() => actions.buyBooster(key)}>
+                {fmtMoney(b.price)}
               </Btn>
             </div>
           ))}
@@ -76,10 +76,10 @@ export default function ClubView({ game, actions }) {
 
       <Section
         title="Palmarés"
-        right={account.trophies.length > 0 && <Pill color="#d97706">🏆 {account.trophies.length} taça{account.trophies.length === 1 ? "" : "s"}</Pill>}
+        right={account.trophies.length > 0 && <Pill color="#f5b83d">🏆 {account.trophies.length} taça{account.trophies.length === 1 ? "" : "s"}</Pill>}
       >
         {account.trophies.length === 0
-          ? <p className="text-xs text-[#9aa08e]">Palmarés vazio — vence a tua primeira taça para o estrear!</p>
+          ? <p className="text-xs text-[var(--t3)]">Palmarés vazio — vence a tua primeira taça para o estrear!</p>
           : (
             <>
               {/* vitrine por nível */}
@@ -91,18 +91,18 @@ export default function ClubView({ game, actions }) {
                     return acc;
                   }, {})
                 ).sort((a, b) => b[0] - a[0]).map(([lvl, n]) => (
-                  <span key={lvl} className="box-cream rounded-md px-2.5 py-1 text-xs font-bold text-[#a07407]">
+                  <span key={lvl} className="box-cream rounded-md px-2.5 py-1 text-xs font-bold text-[var(--gold)]">
                     Nível {lvl}: {n}× 🏆
                   </span>
                 ))}
               </div>
               <div className="flex max-h-56 flex-col gap-1 overflow-y-auto">
                 {[...account.trophies].reverse().map((t, i) => (
-                  <p key={i} className="box-cream flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-semibold text-[#a07407]">
+                  <p key={i} className="box-cream flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-semibold text-[var(--gold)]">
                     <span className="text-lg">{t.icon ?? "🏆"}</span>
                     <span className="min-w-0 flex-1 truncate">{t.label}</span>
-                    {t.level && <span className="text-[10px] font-normal text-[#9aa08e]">nível {t.level}</span>}
-                    <span className="text-xs font-normal text-[#9aa08e]">{fmtWhen(t.at)}</span>
+                    {t.level && <span className="text-[10px] font-normal text-[var(--t3)]">nível {t.level}</span>}
+                    <span className="text-xs font-normal text-[var(--t3)]">{fmtWhen(t.at)}</span>
                   </p>
                 ))}
               </div>
@@ -113,11 +113,11 @@ export default function ClubView({ game, actions }) {
       <Section title="Histórico de jogos">
         <div className="flex max-h-56 flex-col gap-1 overflow-y-auto">
           {game.history.map((h, i) => (
-            <div key={i} className="flex items-center gap-2 rounded bg-[#f7f8f1] px-2 py-1 text-xs">
-              <span className={`w-5 text-center font-black ${h.outcome === "V" ? "text-[#3d8c0e]" : h.outcome === "E" ? "text-[#c98d09]" : "text-[#c0392b]"}`}>{h.outcome}</span>
-              <span className="w-14 text-[#9aa08e]">{fmtWhen(h.at)}</span>
+            <div key={i} className="flex items-center gap-2 rounded bg-[var(--s2)] px-2 py-1 text-xs">
+              <span className={`w-5 text-center font-black ${h.outcome === "V" ? "text-[var(--green)]" : h.outcome === "E" ? "text-[var(--gold)]" : "text-[var(--danger)]"}`}>{h.outcome}</span>
+              <span className="w-14 text-[var(--t3)]">{fmtWhen(h.at)}</span>
               <span className="min-w-0 flex-1 truncate">{h.isHome ? "vs" : "@"} {h.opp}</span>
-              <span className="text-[#9aa08e]">{{ amigavel: "amigável", taca: "taça" }[h.kind] ?? h.kind}</span>
+              <span className="text-[var(--t3)]">{{ amigavel: "amigável", taca: "taça", liga: "liga" }[h.kind] ?? h.kind}</span>
               <b className="tabular-nums">{h.score[0]}-{h.score[1]}</b>
               {h.auto && <span title="simulado automaticamente">🤖</span>}
             </div>
@@ -127,7 +127,7 @@ export default function ClubView({ game, actions }) {
 
       <Section title="Conta">
         <div className="flex items-center justify-between gap-2">
-          <p className="text-xs text-[#8a9077]">
+          <p className="text-xs text-[var(--t3)]">
             A tua conta e o save vivem na base de dados do servidor — podes entrar de qualquer browser com o teu email.
           </p>
           <Btn kind="dark" onClick={actions.logout}>Sair da conta 🚪</Btn>
@@ -138,8 +138,8 @@ export default function ClubView({ game, actions }) {
 }
 
 const MiniStat = ({ label, value }) => (
-  <div className="rounded-md border border-[#e6e8da] bg-[#f7f8f1] px-1 py-1.5">
-    <p className="font-bold text-[#3a4030]">{value}</p>
-    <p className="text-[10px] text-[#9aa08e]">{label}</p>
+  <div className="rounded-md border border-[var(--line)] bg-[var(--s2)] px-1 py-1.5">
+    <p className="font-bold text-[var(--t1)]">{value}</p>
+    <p className="text-[10px] text-[var(--t3)]">{label}</p>
   </div>
 );

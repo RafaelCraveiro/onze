@@ -13,8 +13,8 @@ const load = (p) => server.ssrLoadModule(p);
 const { simulateMatch } = await load("/src/engine/match.js");
 const { prepareBotTeam, prepareUserTeam, autoPickXI } = await load("/src/engine/team.js");
 const { buildTimeline } = await load("/src/engine/timeline.js");
-const { xpForNext, totalSkill, talentCap, SKILL_CAP, trainCost, STARTING_MONEY } = await load("/src/engine/constants.js");
-const { applyClubXp, applyUserResult } = await load("/src/engine/progress.js");
+const { xpForNext, overallBase, SKILL_CAP, STARTING_MONEY } = await load("/src/engine/constants.js");
+const { applyClubXp, applyUserResult, growPlayer } = await load("/src/engine/progress.js");
 const { processTime } = await load("/src/engine/realtime.js");
 const { genInitialSquad } = await load("/src/engine/generation.js");
 
@@ -25,7 +25,7 @@ const check = (name, cond, detail = "") => {
   else { failures++; console.error(`  ✘ FALHOU: ${name} ${detail}`); }
 };
 
-const mkBot = (level, id = "b0") => ({ id, user: "bot", team: "Bot FC", level, str: 72 + level * 4.5, xp: 0, wins: 0 });
+const mkBot = (level, id = "b0") => ({ id, user: "bot", team: "Bot FC", level, str: 42 + level * 2.6, xp: 0, wins: 0 });
 const EMB = { shape: "escudo", pattern: "liso", symbol: "⚽", c1: "#2563eb", c2: "#fff" };
 
 /* Réplica em memória do que server/club.mjs monta a partir da BD — o motor é
@@ -48,24 +48,26 @@ const newGame = () => {
   };
 };
 
-/* ---------- 0. Geração de jogadores (escala 11x11) ---------- */
+/* ---------- 0. Geração de jogadores ---------- */
 {
-  console.log("\n[0] Plantel inicial (Skl estilo 11x11)");
-  let min = 999, max = 0, sum = 0, n = 0, sevens = 0, gk = 0;
+  console.log("\n[0] Plantel inicial");
+  let min = 999, max = 0, sum = 0, n = 0, gems = 0, gk = 0, traits = 0;
   for (let i = 0; i < 200; i++) {
     const squad = genInitialSquad(Math.random);
-    if (squad.length !== 18) failures++;
+    if (squad.length !== 20) failures++;
     gk += squad.filter((p) => p.pos === "Gk").length;
     for (const p of squad) {
-      const t = totalSkill(p);
+      const t = overallBase(p);
       min = Math.min(min, t); max = Math.max(max, t); sum += t; n++;
-      if (p.talent >= 7) sevens++;
+      if (p.pot >= 80) gems++;
+      traits += p.traits.length;
+      if (p.pot < t) failures++;
     }
   }
-  console.log(`  Skl: min=${min} máx=${max} média=${(sum / n).toFixed(0)} · talento 7+: ${(100 * sevens / n).toFixed(2)}% · GR/plantel=${gk / 200}`);
-  check("Skl médio em [70, 95]", sum / n >= 70 && sum / n <= 95, `(${(sum / n).toFixed(0)})`);
-  check("talento 7 MUITO raro (0,3%–4%, alvo ~1%)", sevens / n >= 0.003 && sevens / n < 0.04, `(${(100 * sevens / n).toFixed(2)}%)`);
-  check("3 guarda-redes por plantel", gk === 600);
+  console.log(`  qualidade: min=${min} máx=${max} média=${(sum / n).toFixed(1)} · joias: ${(100 * gems / n).toFixed(1)}% · características/jogador: ${(traits / n).toFixed(2)}`);
+  check("qualidade média em [44, 54]", sum / n >= 44 && sum / n <= 54, `(${(sum / n).toFixed(1)})`);
+  check("joias raras (até 12%)", gems / n < 0.12, `(${(100 * gems / n).toFixed(1)}%)`);
+  check("2 guarda-redes por plantel", gk === 400);
 }
 
 /* ---------- 1. Calibração estatística ---------- */
@@ -113,72 +115,38 @@ const newGame = () => {
   check("zero violações", violations === 0, `(${violations})`);
 }
 
-/* ---------- 3. XP do clube (curva nova: 100 / 300 / depois dobra sempre) ---------- */
+/* ---------- 3. Reputação do clube ---------- */
 {
-  console.log("\n[3] XP do clube");
-  check("nível 1→2 precisa de 100 XP", xpForNext(1) === 100, `(${xpForNext(1)})`);
-  check("nível 2→3 precisa de 300 XP (3×)", xpForNext(2) === 300, `(${xpForNext(2)})`);
-  check("nível 3→4 precisa de 600 XP (dobra)", xpForNext(3) === 600, `(${xpForNext(3)})`);
-  check("nível 4→5 precisa de 1200 XP (dobra outra vez)", xpForNext(4) === 1200, `(${xpForNext(4)})`);
-
+  console.log("\n[3] Reputação do clube");
+  check("curva cresce sempre", [1, 2, 3, 5, 10, 20].every((l) => xpForNext(l + 1) > xpForNext(l)));
   const fake = { club: { level: 1, xp: 0, totalXp: 0 }, inbox: [] };
-  for (let i = 0; i < 33; i++) applyClubXp(fake, 3); // 99 XP — ainda não chega aos 100
-  check("99 XP ainda no nível 1", fake.club.level === 1 && fake.club.xp === 99, `(nv${fake.club.level} xp${fake.club.xp})`);
-  applyClubXp(fake, 3); // 102 XP totais → sobe (gasta 100, sobra 2)
-  check("ultrapassar 100 XP sobe para o nível 2", fake.club.level === 2 && fake.club.xp === 2, `(nv${fake.club.level} xp${fake.club.xp})`);
+  applyClubXp(fake, xpForNext(1) - 1);
+  check("um ponto a menos não sobe", fake.club.level === 1);
+  applyClubXp(fake, 3);
+  check("ao passar a meta sobe e guarda o resto", fake.club.level === 2 && fake.club.xp === 2, `(nv${fake.club.level} xp${fake.club.xp})`);
 }
 
-/* ---------- 4. XP de treino banked POR JOGO (talento manda) + distribuição manual ---------- */
+/* ---------- 4. Evolução automática ---------- */
 {
-  console.log("\n[4] Os jogadores ganham XP com os jogos (banked) — o treinador distribui à mão");
+  console.log("\n[4] Os jogadores evoluem a jogar, sem passar o potencial");
   const game = newGame();
-  const beforeXp = new Map(game.players.map((p) => [p.id, p.trainingXp ?? 0]));
-  const beforeSkills = new Map(game.players.map((p) => [p.id, totalSkill(p)]));
-  const N = 12;
-  for (let i = 0; i < N; i++) {
-    const user = prepareUserTeam(game);
-    const bot = prepareBotTeam(mkBot(1, "b9"), i);
-    const result = simulateMatch({ home: user, away: bot });
-    applyUserResult(game, { kind: "taca", userSide: "H", result, oppName: "Bot FC", isHome: true });
+  const before = new Map(game.players.map((p) => [p.id, overallBase(p)]));
+  for (let i = 0; i < 60; i++) {
+    const result = simulateMatch({ home: prepareUserTeam(game), away: prepareBotTeam(mkBot(1, "b9"), i) });
+    applyUserResult(game, { kind: "liga", userSide: "H", result, oppName: "Bot FC", isHome: true });
     for (const p of game.players) { p.fitness = 100; p.injuryMin = 0; p.suspension = 0; }
   }
-  // as skills NÃO mudam sozinhas com os jogos — só o XP banked sobe
-  const skillDrift = game.players.some((p) => totalSkill(p) !== beforeSkills.get(p.id));
-  check("skills ficam intactas até o treinador gastar XP", !skillDrift);
-
-  const growth = game.players
-    .filter((p) => p.stats.games >= N * 0.6)
-    .map((p) => ({ talent: p.talent, age: p.age, delta: (p.trainingXp ?? 0) - beforeXp.get(p.id) }));
-  const avg = growth.reduce((s, g) => s + g.delta, 0) / Math.max(1, growth.length);
-  const hi = growth.filter((g) => g.talent >= 5 && g.age <= 24);
-  const lo = growth.filter((g) => g.talent <= 2);
-  const hiAvg = hi.length ? hi.reduce((s, g) => s + g.delta, 0) / hi.length : 0;
-  const loAvg = lo.length ? lo.reduce((s, g) => s + g.delta, 0) / lo.length : 1;
-  console.log(`  ${N} jogos de taça: XP banked médio=+${avg.toFixed(1)} · talento alto jovem=+${hiAvg.toFixed(1)} · talento baixo=+${loAvg.toFixed(1)}`);
-  check("titulares ganharam XP de treino com os jogos", avg > 0, `(+${avg.toFixed(2)})`);
-  check("talento alto ganha mais XP por jogo que talento baixo", hi.length === 0 || lo.length === 0 || hiAvg > loAvg);
-
-  // o treinador gasta agora manualmente o XP banked de UM jogador num atributo
-  const p = game.players.find((pl) => (pl.trainingXp ?? 0) > 0);
-  const skill = "passe";
-  const startSkill = p.skills[skill] ?? 0;
-  const startXp = p.trainingXp;
-  let spent = 0, ups = 0;
-  while (p.skills[skill] < SKILL_CAP) {
-    const cost = trainCost(Math.floor(p.skills[skill]));
-    if (p.trainingXp < cost) break;
-    p.trainingXp -= cost;
-    p.skills[skill] = Math.min(SKILL_CAP, Math.floor(p.skills[skill]) + 1);
-    spent += cost;
-    ups++;
-  }
-  check("gastar XP banked sobe o atributo escolhido", ups > 0 && p.skills[skill] === startSkill + ups, `(${startSkill}→${p.skills[skill]})`);
-  check("XP gasto bate certo com o custo acumulado (crescente)", p.trainingXp === startXp - spent, `(sobra=${p.trainingXp})`);
-  check("nunca ultrapassa o teto (25)", p.skills[skill] <= SKILL_CAP);
-
-  let capped = 0;
-  for (const pl of game.players) for (const v of Object.values(pl.skills)) if (v > talentCap(pl.talent) + 0.01) capped++;
-  check("nenhuma sub-habilidade acima do teto (25)", capped === 0, `(${capped})`);
+  const played = game.players.filter((p) => p.stats.games >= 30);
+  const grew = (f) => { const l = played.filter(f); return l.length ? l.reduce((s, p) => s + overallBase(p) - before.get(p.id), 0) / l.length : null; };
+  const young = grew((p) => p.age <= 21 && p.pot - before.get(p.id) >= 6), old = grew((p) => p.age >= 30);
+  console.log(`  60 jogos: jovens com margem +${young?.toFixed(1)} · veteranos +${old?.toFixed(1)}`);
+  check("jovens com margem evoluem", young === null || young > 0.8, `(${young})`);
+  check("jovens evoluem mais do que veteranos", young === null || old === null || young > old);
+  check("ninguém passa o potencial", game.players.every((p) => overallBase(p) <= Math.max(p.pot, before.get(p.id) ?? 0)));
+  check("nenhum atributo acima do teto", game.players.every((p) => Object.values(p.skills).every((v) => v <= SKILL_CAP)));
+  const f = { pos: "Cf", pot: 90, age: 19, focus: "fisico", trainingXp: 300, skills: { finalizacao: 50, criacao: 50, velocidade: 50, fisico: 50, defesa: 10, reflexos: 10 } };
+  growPlayer(f);
+  check("o foco escolhido é o atributo que sobe", f.skills.fisico > 50 && f.skills.finalizacao === 50, JSON.stringify(f.skills));
 }
 
 /* ---------- 5. (As taças são multi-jogador e vivem no servidor: scripts/cuptest.mjs) ---------- */
@@ -208,16 +176,15 @@ const newGame = () => {
     if (game.club.level > 30) bad.push("nível>30");
     for (const p of game.players) {
       if (p.fitness < 0 || p.fitness > 100) bad.push("energia fora de [0,100]");
-      for (const v of Object.values(p.skills)) if (v > 25) bad.push(`sub-skill ${v} acima do teto global`);
+      for (const v of Object.values(p.skills)) if (v > 99) bad.push(`atributo ${v} acima do teto`);
     }
   }
   const size = JSON.stringify(game).length;
   console.log(`  nível=${game.club.level} dinheiro=${Math.round(game.club.money)}€ plantel=${game.players.length} jogos=${game.account.wins + game.account.draws + game.account.losses} save=${(size / 1024).toFixed(0)}KB`);
   check("sem violações de invariantes", bad.length === 0, bad.slice(0, 5).join("; "));
-  check("dinheiro nunca colapsa (sem salários)", game.club.money > 0);
+  check("dinheiro nunca fica negativo", game.club.money >= 0, `(${game.club.money})`);
   check("save < 1MB", size < 1024 * 1024, `(${(size / 1024).toFixed(0)}KB)`);
   check("inbox ≤60 e histórico ≤40", game.inbox.length <= 60 && game.history.length <= 40);
-  check("XP bate certo com o registo (regra do anti-cheat)", game.club.totalXp === 3 * game.account.wins + game.account.draws);
 }
 
 /* ---------- 7. Timeline 2D ---------- */

@@ -14,7 +14,7 @@
    simulação — o jogador sai das listas de amostragem no momento. */
 
 import {
-  fitnessFactor, moraleFactor, STYLES, MATCHUP, lineOf, posPenalty, gkOf,
+  fitnessFactor, moraleFactor, STYLES, MATCHUP, lineOf, posPenalty, gkOf, engineProfile,
 } from "./constants.js";
 
 const CHANCE_BASE = 0.226;  // probabilidade-base de uma posse acabar em remate
@@ -75,8 +75,9 @@ const unitsOf = (side, min) => {
            style, morale, home, medicoLvl } */
 const initSide = (team) => ({
   ...team,
-  on: team.players.map((p, i) => ({ p, slotPos: team.slots?.[i] ?? p.pos })),
-  bench: [...(team.bench ?? [])],
+  morale: Math.min(100, (team.morale ?? 60) + Math.min(6, team.players.filter((p) => p.traits?.includes("lider")).length * 3)),
+  on: team.players.map((p, i) => ({ p: { ...p, skills: engineProfile(p) }, slotPos: team.slots?.[i] ?? p.pos })),
+  bench: (team.bench ?? []).map((p) => ({ ...p, skills: engineProfile(p) })),
   booked: {},   // pid -> minuto do amarelo (guardar o MINUTO, não boolean)
   reds: new Set(),
   goals: 0, shots: 0, onTarget: 0, corners: 0, fouls: 0, xg: 0, possTime: 0,

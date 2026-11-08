@@ -7,15 +7,15 @@ const N = Number(process.argv[2] ?? 3000);
 let nextId = 0;
 
 const profile = (pos, base, focus = {}) => {
-  const line = pos === "Gk" ? "GR" : /d$/.test(pos) ? "DF" : /m$/.test(pos) ? "MD" : "AV";
+  const line = pos === "Gk" ? "GR" : pos.endsWith("d") ? "DF" : pos.endsWith("m") ? "MD" : "AV";
   const w = {
-    GR: { desarme: 1.1, marcacao: 1.1, drible: 0.4, controlo: 1.1, resistencia: 1.1, passe: 0.5, potencia: 0.4, precisao: 1 },
-    DF: { desarme: 1.2, marcacao: 1.2, drible: 0.6, controlo: 0.8, resistencia: 1.1, passe: 0.8, potencia: 0.6, precisao: 0.5 },
-    MD: { desarme: 0.9, marcacao: 0.8, drible: 1, controlo: 1.2, resistencia: 1.1, passe: 1.3, potencia: 0.8, precisao: 0.8 },
-    AV: { desarme: 0.4, marcacao: 0.4, drible: 1.2, controlo: 1, resistencia: 1, passe: 0.8, potencia: 1.25, precisao: 1.25 },
+    GR: { finalizacao: 0.5, criacao: 0.6, velocidade: 0.4, fisico: 1, defesa: 0.3, reflexos: 1.055 },
+    DF: { finalizacao: 0.55, criacao: 0.8, velocidade: 0.6, fisico: 1.1, defesa: 1.2, reflexos: 0.2 },
+    MD: { finalizacao: 0.8, criacao: 1.25, velocidade: 1, fisico: 1.1, defesa: 0.85, reflexos: 0.2 },
+    AV: { finalizacao: 1.25, criacao: 0.9, velocidade: 1.2, fisico: 1, defesa: 0.4, reflexos: 0.2 },
   }[line];
   const f = focus[line] ?? 1;
-  return Object.fromEntries(Object.entries(w).map(([k, v]) => [k, Math.max(1, Math.min(25, base * v * f))]));
+  return Object.fromEntries(Object.entries(w).map(([k, v]) => [k, Math.max(1, Math.min(99, base * 4 * v * f))]));
 };
 
 const team = ({ base = 10, formation = "4-4-2", style = "equilibrado", focus = {}, misplaced = false, morale = 70, fitness = 100 }) => {

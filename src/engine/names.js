@@ -14,7 +14,7 @@ const PT_LAST = [
   "Machado", "Barbosa", "Tavares", "Lourenço", "Azevedo", "Freitas", "Borges", "Faria", "Amaral", "Baptista",
 ];
 
-/* Nacionalidades: Portugal domina, com estrangeiros à mistura (como no 11x11). */
+/* Nacionalidades: Portugal domina, com estrangeiros à mistura. */
 export const NATIONS = [
   { code: "PT", flag: "🇵🇹", w: 62, first: PT_FIRST, last: PT_LAST },
   { code: "BR", flag: "🇧🇷", w: 8, first: ["Carlinhos", "Ronaldinho", "Juninho", "Marcelo", "Thiago", "Wesley", "Caio", "Matheus", "Gustavo", "Vinícius"], last: ["do Nascimento", "de Souza", "Pereira", "Cavalcanti", "Batista", "Moraes", "Santana", "Barros"] },

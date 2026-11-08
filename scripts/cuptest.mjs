@@ -4,7 +4,7 @@ import { createMemoryDb } from "../server/db.mjs";
 import { createServer } from "vite";
 
 const server = await createServer({ root: process.cwd(), server: { middlewareMode: true }, logLevel: "error" });
-const { totalSkill } = await server.ssrLoadModule("/src/engine/constants.js");
+const totalSkill = (p) => Object.values(p.skills).reduce((a, b) => a + b, 0);
 
 const db = await createMemoryDb();
 await db.exec(`
@@ -27,7 +27,7 @@ const mkUser = async (id, name) => {
 };
 
 console.log("\n[1] Duas contas reais no MESMO bracket");
-const CUP_EVERY = 10 * 60 * 1000;
+const CUP_EVERY = 30 * 60 * 1000;
 let now = Math.floor(Date.now() / CUP_EVERY) * CUP_EVERY; // alinhado ao slot
 await mkUser(1, "Alpha FC");
 await mkUser(2, "Beta FC");
@@ -70,8 +70,7 @@ check("resultado tem placar coerente", m1.result.score[0] >= 0 && m1.result.scor
 
 const skillAfter1 = (await club.loadGame(1)).players.reduce((s, p) => s + totalSkill(p), 0);
 const xpAfter1 = (await club.loadGame(1)).players.reduce((s, p) => s + (p.trainingXp ?? 0), 0);
-check("as skills NÃO mudam sozinhas ao jogar (só o treinador as sobe)", skillAfter1 === skillBefore1, `(${skillBefore1} → ${skillAfter1})`);
-check("os jogadores do user 1 GANHARAM XP de treino ao jogar (persistido no servidor)", xpAfter1 > xpBefore1, `(${xpBefore1} → ${xpAfter1})`);
+check("os jogadores do user 1 evoluíram com o jogo (no servidor)", skillAfter1 + xpAfter1 > skillBefore1 + xpBefore1, `(${skillBefore1 + xpBefore1} → ${skillAfter1 + xpAfter1})`);
 
 console.log("\n[3] Falta de comparência = 3-0 (sem prémio)");
 now = Math.floor((now + CUP_EVERY) / CUP_EVERY) * CUP_EVERY;

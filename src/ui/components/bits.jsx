@@ -1,9 +1,9 @@
-/* Micro-componentes partilhados — tema claro estilo 11x11. */
+/* Micro-componentes partilhados — usam os tokens de src/index.css. */
 
-import { POS_COLOR, lineOf } from "../../engine/constants.js";
+import { POS_COLOR, POS_LABEL, lineOf, potentialGrade } from "../../engine/constants.js";
 import { talentColor } from "../helpers.js";
 
-export const Pill = ({ children, color = "#4f9312", className = "" }) => (
+export const Pill = ({ children, color = "#5fe08c", className = "" }) => (
   <span
     className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${className}`}
     style={{ backgroundColor: color + "22", color }}
@@ -16,32 +16,28 @@ export const PosBadge = ({ pos }) => {
   const c = POS_COLOR[lineOf(pos)] ?? "#666";
   return (
     <span
-      className="inline-flex w-8 justify-center rounded border px-1 py-0.5 text-[11px] font-bold"
-      style={{ backgroundColor: c + "15", color: c, borderColor: c + "44" }}
+      className="inline-flex w-8 justify-center rounded-md px-1 py-0.5 text-[11px] font-bold"
+      style={{ backgroundColor: c + "1f", color: c }}
     >
-      {pos}
+      {POS_LABEL[pos] ?? pos}
     </span>
   );
 };
 
-export const Talent = ({ t, showNum = false }) => (
-  <span className="text-xs font-semibold tracking-tight" style={{ color: talentColor(t) }} title={`Talento ${t}/9`}>
-    {"★".repeat(Math.min(t, 5))}
-    {t > 5 && <span className="ml-0.5 align-middle text-[10px]">+{t - 5}</span>}
-    {showNum && <span className="ml-1 opacity-80">({t})</span>}
-  </span>
+export const Talent = ({ t }) => (
+  <span className="font-bold" style={{ color: talentColor(t) }} title={`Potencial ${t}`}>Pot. {potentialGrade(t)}</span>
 );
 
-export const Bar = ({ value, max = 100, color = "#5da814", className = "" }) => (
-  <div className={`h-1.5 w-full overflow-hidden rounded bg-[#e3e5d8] ${className}`}>
-    <div className="h-full rounded" style={{ width: `${Math.min(100, (value / max) * 100)}%`, backgroundColor: color }} />
+export const Bar = ({ value, max = 100, color = "#b6f23a", className = "" }) => (
+  <div className={`h-1.5 w-full overflow-hidden rounded-full bg-[var(--s3)] ${className}`}>
+    <div className="h-full rounded-full transition-[width] duration-300" style={{ width: `${Math.min(100, (value / max) * 100)}%`, backgroundColor: color }} />
   </div>
 );
 
 export const Section = ({ title, right, children }) => (
-  <section className="rounded-lg border border-[#d9dcc8] bg-white p-3 shadow-sm">
-    <div className="mb-2 flex items-center justify-between border-b border-[#e6e8da] pb-1.5">
-      <h3 className="text-sm font-bold uppercase tracking-wide text-[#4f7a12]">{title}</h3>
+  <section className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4">
+    <div className="mb-3 flex items-center justify-between gap-2">
+      <h3 className="font-display text-lg font-semibold uppercase tracking-wide text-[var(--t1)]">{title}</h3>
       {right}
     </div>
     {children}
@@ -51,16 +47,16 @@ export const Section = ({ title, right, children }) => (
 export const Btn = ({ children, onClick, disabled, kind = "primary", className = "", title }) => {
   const styles = {
     primary: "btn-green",
-    dark: "bg-[#e8eadd] hover:bg-[#dde0cd] text-[#3a4030] border border-[#c9cdb6]",
-    danger: "bg-[#c0392b] hover:bg-[#d64535] text-white",
-    gold: "bg-gradient-to-b from-[#f5c33b] to-[#dfa112] hover:brightness-105 text-[#4a3305]",
+    dark: "bg-[var(--s3)] hover:bg-[#33404d] text-[var(--t1)]",
+    danger: "bg-[var(--danger)] hover:brightness-110 text-[#1c0a0b] font-bold",
+    gold: "bg-[var(--gold)] hover:brightness-110 text-[#241803] font-bold",
   };
   return (
     <button
       onClick={onClick}
       disabled={disabled}
       title={title}
-      className={`rounded-md px-3 py-1.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-40 ${styles[kind]} ${className}`}
+      className={`rounded-lg px-3.5 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-40 ${styles[kind]} ${className}`}
     >
       {children}
     </button>

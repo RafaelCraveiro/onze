@@ -29,10 +29,10 @@ export default function PreMatchModal({ game, actions, pre, onClose, onPlay }) {
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-3" onClick={onClose}>
-      <div className="onze-pop max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-xl border border-[#c9cdb6] bg-white p-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+      <div className="onze-pop max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="mb-2 flex items-start justify-between">
-          <h2 className="text-lg font-black text-[#4f7a12]">Enviar equipa</h2>
-          <button onClick={onClose} className="rounded-md border border-[#c9cdb6] bg-[#f4f5ec] px-2 py-1 text-sm">✕</button>
+          <h2 className="text-lg font-black text-[var(--green)]">Enviar equipa</h2>
+          <button onClick={onClose} className="rounded-md border border-[var(--line)] bg-[var(--s2)] px-2 py-1 text-sm">✕</button>
         </div>
 
         {pre.kind === "taca" && cup && (
@@ -41,25 +41,25 @@ export default function PreMatchModal({ game, actions, pre, onClose, onPlay }) {
               {opp && <Emblem emblem={opp.emblem} size={34} />}
               <div className="min-w-0 text-sm">
                 <p className="truncate font-bold">{opp ? `${m.h === YOU ? "vs" : "@"} ${opp.name}` : "—"}
-                  {opp?.isUser && <span className="ml-1 rounded bg-[#2563eb1a] px-1 text-[9px] font-bold text-[#2563eb]">MANAGER REAL</span>}
-                  {opp && <span className="ml-2 text-xs font-normal text-[#8a9077]">nível {opp.level}</span>}
+                  {opp?.isUser && <span className="ml-1 rounded bg-[var(--info-soft)] px-1 text-[9px] font-bold text-[var(--info)]">MANAGER REAL</span>}
+                  {opp && <span className="ml-2 text-xs font-normal text-[var(--t3)]">nível {opp.level}</span>}
                 </p>
-                <p className="truncate text-xs text-[#6b7261]">{cup.icon} {cup.name} · {cupRoundName(cup.roundIdx)}</p>
+                <p className="truncate text-xs text-[var(--t2)]">{cup.icon} {cup.name} · {cupRoundName(cup.roundIdx)}</p>
               </div>
             </div>
             {deadline && (
-              <Pill color="#c0392b">⏱ até às {fmtTime(deadline)} ({countdown(deadline - now)})</Pill>
+              <Pill color="#ff6b6f">⏱ até às {fmtTime(deadline)} ({countdown(deadline - now)})</Pill>
             )}
           </div>
         )}
         {pre.kind === "amigavel" && (
-          <p className="box-cream mb-3 rounded-md px-3 py-2 text-sm text-[#6b6427]">
+          <p className="box-cream mb-3 rounded-md px-3 py-2 text-sm text-[var(--t2)]">
             Jogo amigável contra um manager do teu nível — escolhe o onze e joga.
           </p>
         )}
 
         {expired ? (
-          <p className="rounded-md border border-[#e8b4ae] bg-[#fdeeec] px-3 py-2 text-sm font-semibold text-[#c0392b]">
+          <p className="rounded-md border border-[var(--danger-line)] bg-[var(--danger-soft)] px-3 py-2 text-sm font-semibold text-[var(--danger)]">
             A janela de registo desta ronda fechou.
           </p>
         ) : (

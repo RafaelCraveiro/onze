@@ -124,14 +124,12 @@ export default function MatchViewer2D({ live, club, onFinish }) {
     };
 
     const drawPitch = () => {
-      const g = ctx.createLinearGradient(0, 0, 0, Hh);
-      g.addColorStop(0, "#1e8043"); g.addColorStop(1, "#15612f");
-      ctx.fillStyle = g; ctx.fillRect(0, 0, W, Hh);
+      ctx.fillStyle = "#123a2a"; ctx.fillRect(0, 0, W, Hh);
       for (let i = 0; i < 12; i++) {
-        ctx.fillStyle = i % 2 ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)";
+        ctx.fillStyle = i % 2 ? "rgba(255,255,255,0.028)" : "rgba(0,0,0,0.05)";
         ctx.fillRect(px(0) + (i * PW) / 12, py(0), PW / 12, PHt);
       }
-      ctx.strokeStyle = "rgba(255,255,255,0.8)"; ctx.lineWidth = 2;
+      ctx.strokeStyle = "rgba(255,255,255,0.5)"; ctx.lineWidth = 1.5;
       ctx.strokeRect(px(0), py(0), PW, PHt);
       ctx.beginPath(); ctx.moveTo(px(0.5), py(0)); ctx.lineTo(px(0.5), py(1)); ctx.stroke();
       ctx.beginPath(); ctx.arc(px(0.5), py(0.5), 44, 0, Math.PI * 2); ctx.stroke();
@@ -150,8 +148,8 @@ export default function MatchViewer2D({ live, club, onFinish }) {
         ctx.strokeStyle = "rgba(255,255,255,0.4)"; ctx.lineWidth = 0.6;
         for (let n = 0; n <= 4; n++) { const yy = goalTop + ((goalBot - goalTop) * n) / 4; ctx.beginPath(); ctx.moveTo(gx, yy); ctx.lineTo(gx + netD, yy); ctx.stroke(); }
         for (let n = 0; n <= 3; n++) { const xx = gx + (netD * n) / 3; ctx.beginPath(); ctx.moveTo(xx, goalTop); ctx.lineTo(xx, goalBot); ctx.stroke(); }
-        ctx.strokeStyle = "rgba(255,255,255,0.95)"; ctx.lineWidth = 3;
-        ctx.beginPath(); ctx.moveTo(gx, goalTop); ctx.lineTo(gx, goalBot); ctx.stroke(); ctx.lineWidth = 2;
+        ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.moveTo(gx, goalTop); ctx.lineTo(gx, goalBot); ctx.stroke(); ctx.lineWidth = 1.5; ctx.strokeStyle = "rgba(255,255,255,0.5)";
       }
     };
 
@@ -164,15 +162,14 @@ export default function MatchViewer2D({ live, club, onFinish }) {
       ctx.translate(X, Y);
       if (a.down || a.dive) ctx.rotate(Math.PI / 2); // caído / guarda-redes em voo
       ctx.beginPath(); ctx.ellipse(0, 7, 6, 2.4, 0, 0, Math.PI * 2); ctx.fillStyle = "rgba(0,0,0,0.28)"; ctx.fill();
-      if (isCarrier) { ctx.beginPath(); ctx.arc(0, 0, 12.5, 0, Math.PI * 2); ctx.strokeStyle = "#facc15"; ctx.lineWidth = 2.5; ctx.stroke(); }
-      const stretch = clamp(spd * 3.5, 0, 0.5);
+      if (isCarrier) { ctx.beginPath(); ctx.arc(0, 0, 12.5, 0, Math.PI * 2); ctx.strokeStyle = "#b6f23a"; ctx.lineWidth = 2; ctx.stroke(); }
       ctx.save(); ctx.rotate(ang);
-      ctx.beginPath(); ctx.ellipse(0, 0, 8.5 * (1 + stretch * 0.5), 8.5 * (1 - stretch * 0.35), 0, 0, Math.PI * 2);
-      ctx.fillStyle = a.gk ? "#f59e0b" : color; ctx.fill();
-      ctx.lineWidth = 1.5; ctx.strokeStyle = "rgba(255,255,255,0.9)"; ctx.stroke();
+      ctx.beginPath(); ctx.arc(0, 0, 8.5, 0, Math.PI * 2);
+      ctx.fillStyle = a.gk ? "#f5b83d" : color; ctx.fill();
+      ctx.lineWidth = 1; ctx.strokeStyle = "rgba(255,255,255,0.55)"; ctx.stroke();
       ctx.restore();
       ctx.fillStyle = a.gk || color === "#f8fafc" ? "#0f172a" : "#fff";
-      ctx.font = "bold 8px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.font = "700 8.5px 'Inter Variable', sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.fillText(String(a.num), 0, 0.5);
       ctx.restore();
     };
@@ -186,7 +183,7 @@ export default function MatchViewer2D({ live, club, onFinish }) {
       S.cam.y += (lerp(0.5, b.pos[1], 0.66) - S.cam.y) * cr;
       S.cam.z += (zTarget - S.cam.z) * clamp(S.dt * 1.8, 0.01, 0.12);
 
-      ctx.fillStyle = "#0a1a10"; ctx.fillRect(0, 0, W, Hh);
+      ctx.fillStyle = "#0b1a14"; ctx.fillRect(0, 0, W, Hh);
       ctx.save(); applyCam(); drawPitch();
 
       // rasto da bola
@@ -201,12 +198,6 @@ export default function MatchViewer2D({ live, club, onFinish }) {
 
       st.A.forEach((a, i) => { if (a.off) return; a._side = "A"; a._i = i; drawDot(a, kitA); });
       st.H.forEach((a, i) => { if (a.off) return; a._side = "H"; a._i = i; drawDot(a, kitH); });
-
-      // árbitro
-      const rx = clamp(b.pos[0] - 0.07, 0.02, 0.98), ry = clamp(b.pos[1] + 0.11, 0.05, 0.95);
-      ctx.save(); ctx.translate(px(rx), py(ry));
-      ctx.beginPath(); ctx.arc(0, 0, 6.5, 0, Math.PI * 2); ctx.fillStyle = "#1e293b"; ctx.fill();
-      ctx.lineWidth = 1; ctx.strokeStyle = "rgba(255,255,255,0.6)"; ctx.stroke(); ctx.restore();
 
       // bola
       if (!st.done || goalMoment) {
@@ -225,18 +216,18 @@ export default function MatchViewer2D({ live, club, onFinish }) {
       if (st.flash > 0.01) { ctx.fillStyle = `rgba(255,255,255,${st.flash * 0.45})`; ctx.fillRect(0, 0, W, Hh); }
 
       const vg = ctx.createRadialGradient(W / 2, Hh / 2, Hh * 0.3, W / 2, Hh / 2, Hh * 0.82);
-      vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,0.28)");
+      vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,0.16)");
       ctx.fillStyle = vg; ctx.fillRect(0, 0, W, Hh);
 
       // banners
       const bn = st.banner;
       if (bn && !st.done) {
         if (bn.kind === "goal") {
-          ctx.fillStyle = "rgba(0,0,0,0.32)"; ctx.fillRect(0, Hh / 2 - 46, W, 92);
-          ctx.fillStyle = "#facc15"; ctx.font = "900 48px sans-serif"; ctx.textAlign = "center";
-          ctx.fillText("GOOOLO!", W / 2, Hh / 2 + 15);
+          ctx.fillStyle = "rgba(11,15,20,0.72)"; ctx.fillRect(0, Hh / 2 - 44, W, 88);
+          ctx.fillStyle = "#b6f23a"; ctx.font = "italic 700 68px 'Barlow Condensed', sans-serif"; ctx.textAlign = "center";
+          ctx.fillText("GOLO", W / 2, Hh / 2 + 23);
         } else if (bn.kind === "save" || bn.kind === "miss") {
-          ctx.fillStyle = "rgba(255,255,255,0.92)"; ctx.font = "bold 22px sans-serif"; ctx.textAlign = "center";
+          ctx.fillStyle = "rgba(255,255,255,0.95)"; ctx.font = "700 26px 'Barlow Condensed', sans-serif"; ctx.textAlign = "center";
           ctx.fillText(bn.text, W / 2, 40);
         } else if (bn.kind === "red" || bn.kind === "yellow") {
           ctx.save(); ctx.translate(W / 2, 44); ctx.rotate(-0.1);
@@ -245,11 +236,11 @@ export default function MatchViewer2D({ live, club, onFinish }) {
         }
       }
       if (st.done) {
-        ctx.fillStyle = "rgba(2,6,23,0.62)"; ctx.fillRect(0, 0, W, Hh);
-        ctx.fillStyle = "#f8fafc"; ctx.font = "900 36px sans-serif"; ctx.textAlign = "center";
-        ctx.fillText(`${result.score[0]} - ${result.score[1]}`, W / 2, Hh / 2 - 8);
-        ctx.font = "600 16px sans-serif"; ctx.fillStyle = "#94a3b8";
-        ctx.fillText(result.penalties ? `Final · penáltis ${result.penalties[0]}-${result.penalties[1]}` : "Final do jogo", W / 2, Hh / 2 + 22);
+        ctx.fillStyle = "rgba(11,15,20,0.74)"; ctx.fillRect(0, 0, W, Hh);
+        ctx.fillStyle = "#eef2f6"; ctx.font = "700 60px 'Barlow Condensed', sans-serif"; ctx.textAlign = "center";
+        ctx.fillText(`${result.score[0]} - ${result.score[1]}`, W / 2, Hh / 2 + 4);
+        ctx.font = "500 15px 'Inter Variable', sans-serif"; ctx.fillStyle = "#aeb9c5";
+        ctx.fillText(result.penalties ? `Final · penáltis ${result.penalties[0]}-${result.penalties[1]}` : "Final do jogo", W / 2, Hh / 2 + 34);
       }
     };
 
@@ -290,14 +281,14 @@ export default function MatchViewer2D({ live, club, onFinish }) {
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between rounded-lg border border-[#d9dcc8] bg-white px-3 py-2 shadow-sm">
+      <div className="flex items-center justify-between rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 py-2">
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <Emblem emblem={homeInfo.emblem} size={30} />
           <span className="truncate text-sm font-bold">{homeInfo.name}</span>
         </div>
         <div className="flex flex-col items-center px-3">
-          <span className="text-2xl font-black tabular-nums">{score[0]} - {score[1]}</span>
-          <span className="text-xs font-bold text-[#4f7a12] tabular-nums">{minute}'</span>
+          <span className="font-display text-4xl font-bold leading-none tabular-nums">{score[0]} - {score[1]}</span>
+          <span className="text-xs font-bold text-[var(--green)] tabular-nums">{minute}'</span>
         </div>
         <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
           <span className="truncate text-right text-sm font-bold">{awayInfo.name}</span>
@@ -305,23 +296,23 @@ export default function MatchViewer2D({ live, club, onFinish }) {
         </div>
       </div>
 
-      <canvas ref={canvasRef} className="w-full rounded-lg border border-[#3e7a1c] shadow" style={{ aspectRatio: "720/460" }} />
+      <canvas ref={canvasRef} className="w-full rounded-2xl border border-[var(--line)]" style={{ aspectRatio: "720/460" }} />
 
       <div className="flex items-center gap-2">
         {!done && (
           <>
-            <button onClick={() => setPlaying((p) => !p)} className="rounded-md border border-[#c9cdb6] bg-white px-3 py-1.5 text-sm font-bold hover:bg-[#f4f5ec]">
+            <button onClick={() => setPlaying((p) => !p)} className="rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 py-1.5 text-sm font-bold hover:bg-[var(--s2)]">
               {playing ? "⏸" : "▶"}
             </button>
             {[1, 2, 4].map((s) => (
-              <button key={s} onClick={() => setSpeed(s)} className={`rounded-md px-3 py-1.5 text-sm font-bold ${speed === s ? "btn-green" : "border border-[#c9cdb6] bg-white hover:bg-[#f4f5ec]"}`}>
+              <button key={s} onClick={() => setSpeed(s)} className={`rounded-md px-3 py-1.5 text-sm font-bold ${speed === s ? "btn-green" : "bg-[var(--s2)] text-[var(--t2)] hover:bg-[var(--s3)]"}`}>
                 {s}x
               </button>
             ))}
-            <button onClick={() => setMuted((m) => !m)} title={muted ? "Ligar som" : "Desligar som"} className="ml-auto rounded-md border border-[#c9cdb6] bg-white px-3 py-1.5 text-sm font-bold hover:bg-[#f4f5ec]">
+            <button onClick={() => setMuted((m) => !m)} title={muted ? "Ligar som" : "Desligar som"} className="ml-auto rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 py-1.5 text-sm font-bold hover:bg-[var(--s2)]">
               {muted ? "🔇" : "🔊"}
             </button>
-            <button onClick={skip} className="rounded-md border border-[#c9cdb6] bg-white px-3 py-1.5 text-sm font-bold hover:bg-[#f4f5ec]">
+            <button onClick={skip} className="rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 py-1.5 text-sm font-bold hover:bg-[var(--s2)]">
               Saltar ⏭
             </button>
           </>
@@ -333,11 +324,11 @@ export default function MatchViewer2D({ live, club, onFinish }) {
         )}
       </div>
 
-      <div className="max-h-40 overflow-y-auto rounded-lg border border-[#d9dcc8] bg-white p-2 shadow-sm">
-        {feed.length === 0 && <p className="p-1 text-xs text-[#9aa08e]">O relato aparece aqui…</p>}
+      <div className="max-h-40 overflow-y-auto rounded-lg border border-[var(--line)] bg-[var(--surface)] p-2">
+        {feed.length === 0 && <p className="p-1 text-xs text-[var(--t3)]">O relato aparece aqui…</p>}
         {feed.map((f, i) => (
-          <p key={feed.length - i} className={`border-b border-[#eef0e4] px-1 py-1 text-xs last:border-0 ${f.type === "goal" ? "font-bold text-[#c98d09]" : f.type === "red" ? "text-[#c0392b]" : "text-[#3a4030]"}`}>
-            <span className="mr-1 inline-block w-7 text-right font-mono text-[#9aa08e]">{f.min}'</span>
+          <p key={feed.length - i} className={`border-b border-[var(--line)] px-1 py-1 text-xs last:border-0 ${f.type === "goal" ? "font-bold text-[var(--gold)]" : f.type === "red" ? "text-[var(--danger)]" : "text-[var(--t1)]"}`}>
+            <span className="mr-1 inline-block w-7 text-right font-mono text-[var(--t3)]">{f.min}'</span>
             {FEED_ICON[f.type] ?? ""} {f.text}
           </p>
         ))}

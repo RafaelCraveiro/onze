@@ -23,7 +23,7 @@ const account = (n, clubName = `Clube ${n}`) => ({ email: `teste${n}@exemplo.tes
 
 console.log("\n[1] Contas e sessões");
 const a = await call("POST", "/api/register", null, account(1, "Alpha FC"));
-check("registo cria conta e clube", a.status === 200 && a.body.game?.players?.length === 18, JSON.stringify(a.body).slice(0, 150));
+check("registo cria conta e clube", a.status === 200 && a.body.game?.players?.length === 20, JSON.stringify(a.body).slice(0, 150));
 const dupName = await call("POST", "/api/register", null, account(2, "alpha fc"));
 check("nome de clube repetido, com outras maiúsculas, recusado", dupName.status === 409 && dupName.body.error === "clube-existe", JSON.stringify(dupName));
 const dupMail = await call("POST", "/api/register", null, account(1, "Outro FC"));
@@ -49,6 +49,12 @@ check("taças listadas", cups.body.cups?.length >= 3, JSON.stringify(cups.body).
 const target = cups.body.cups.filter((c) => c.state === "inscricao").sort((x, y) => x.startsAt - y.startsAt)[0];
 const enrolled = await call("POST", `/api/cups/${target.id}/enroll`, token, {});
 check("inscrição na taça", enrolled.body.ok === true, JSON.stringify(enrolled.body).slice(0, 150));
+
+const lg = await call("GET", "/api/league", token);
+check("a conta entra numa liga de 10 clubes", lg.body.league?.table?.length === 10, JSON.stringify(lg.body).slice(0, 150));
+const pid = a.body.game.players[3].id;
+check("definir foco pela API", (await call("POST", `/api/squad/${pid}/focus`, token, { focus: "fisico" })).body.ok === true);
+check("renovar pela API", (await call("POST", `/api/squad/${pid}/renew`, token, {})).body.ok === true);
 
 console.log("\n[3] Pedidos em simultâneo não duplicam nada");
 await db.prepare("UPDATE club SET money = 100000 WHERE user_id = 1").run();

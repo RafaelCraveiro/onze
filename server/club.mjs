@@ -1,23 +1,13 @@
-/* Plantel + economia AUTORITÁRIOS no servidor.
-   O cliente já não guarda dinheiro nem jogadores — só vê o que o servidor
-   manda. Toda a ação económica (comprar/vender, construir, boosters,
-   registar a equipa, aplicar o resultado de um jogo) passa por aqui, e o
-   servidor usa as mesmas funções puras do motor (src/engine) que já eram
-   testadas no cliente — só muda de onde correm.
-
-   Esquema: club (1 linha/conta), players (N linhas/conta), market (1/conta),
-   meta (1/conta — registo, inbox, histórico). O antigo `saves.data` (blob
-   do cliente) só é lido UMA VEZ, para migrar contas antigas na primeira
-   visita pós-upgrade. */
+/* Plantel e economia autoritários no servidor. */
 
 import {
   STARTING_MONEY, SQUAD_MIN, SQUAD_CAP, BUILDINGS, buildingCost, BOOSTERS,
-  TRAIN_BOOST_MS, MARKET_UNLOCK_LEVEL, FORMATIONS, STYLES,
-  SKILLS, SKILL_CAP, trainCost, totalSkill, playerValue, lastAgeBoundary,
+  MARKET_UNLOCK_LEVEL, FORMATIONS, STYLES,
+  SKILLS, overallBase, playerValue, renewCost, lastAgeBoundary, convertLegacyPlayer, cupTierOf,
 } from "../src/engine/constants.js";
 import { genInitialSquad } from "../src/engine/generation.js";
 import { autoPickXI, prepareUserTeam } from "../src/engine/team.js";
-import { canBuy, canSell } from "../src/engine/market.js";
+import { canBuy, canSell, refreshMarket } from "../src/engine/market.js";
 import { processTime } from "../src/engine/realtime.js";
 import { applyUserResult, pushNews } from "../src/engine/progress.js";
 
@@ -55,15 +45,23 @@ export const initClub = async (database) => {
     CREATE TABLE IF NOT EXISTS world_clock (
       id INT PRIMARY KEY, aged_until DOUBLE PRECISION NOT NULL
     );
+    ALTER TABLE players ADD COLUMN IF NOT EXISTS traits TEXT NOT NULL DEFAULT '[]';
+    ALTER TABLE players ADD COLUMN IF NOT EXISTS focus TEXT;
+    ALTER TABLE players ADD COLUMN IF NOT EXISTS contract DOUBLE PRECISION;
+    ALTER TABLE club ADD COLUMN IF NOT EXISTS next_pay_at DOUBLE PRECISION NOT NULL DEFAULT 0;
+    ALTER TABLE club ADD COLUMN IF NOT EXISTS schema_v INT NOT NULL DEFAULT 1;
   `);
 };
 
 const safeJSON = (s, fallback = {}) => { try { return JSON.parse(s); } catch { return fallback; } };
 
 /* ---------- conversão linha <-> objeto do motor ---------- */
-const rowToPlayer = (row) => ({
-  id: row.id, name: row.name, nat: row.nat, flag: row.flag, pos: row.pos, age: row.age, talent: row.talent,
+const rowToPlayer = (row) => convertLegacyPlayer({
+  id: row.id, name: row.name, nat: row.nat, flag: row.flag, pos: row.pos, age: row.age,
+  ...(row.talent != null && row.talent > 9 ? { pot: row.talent } : { talent: row.talent }),
   skills: safeJSON(row.skills, {}),
+  traits: safeJSON(row.traits, []), focus: row.focus ?? null,
+  ...(row.contract != null ? { contract: row.contract } : {}),
   fitness: row.fitness, morale: row.morale, injuryMin: row.injury_min, suspension: row.suspension,
   stats: safeJSON(row.stats, { games: 0, goals: 0, assists: 0 }),
   trainingXp: row.training_xp ?? 0,
@@ -78,13 +76,13 @@ const identityOf = async (userId) => {
 // um único INSERT com todas as linhas: cada ida ao Supabase custa tempo de rede
 const insertPlayers = async (userId, players) => {
   if (!players.length) return;
-  const row = `(${Array(17).fill("?").join(", ")})`;
+  const row = `(${Array(20).fill("?").join(", ")})`;
   const params = players.flatMap((p, seq) => [
-    p.id, userId, p.name, p.nat, p.flag, p.pos, p.age, p.talent, JSON.stringify(p.skills ?? {}),
+    p.id, userId, p.name, p.nat, p.flag, p.pos, p.age, p.pot ?? p.pot, JSON.stringify(p.skills ?? {}),
     p.fitness ?? 100, p.morale ?? 0, p.injuryMin ?? 0, p.suspension ?? 0,
-    JSON.stringify(p.stats ?? { games: 0, goals: 0, assists: 0 }), p.selling ?? null, Math.max(0, Math.round(p.trainingXp ?? 0)), seq,
+    JSON.stringify(p.stats ?? { games: 0, goals: 0, assists: 0 }), p.selling ?? null, Math.max(0, p.trainingXp ?? 0), seq, JSON.stringify(p.traits ?? []), p.focus ?? null, p.contract ?? 3,
   ]);
-  await db.prepare(`INSERT INTO players (id, user_id, name, nat, flag, pos, age, talent, skills, fitness, morale, injury_min, suspension, stats, selling, training_xp, seq)
+  await db.prepare(`INSERT INTO players (id, user_id, name, nat, flag, pos, age, talent, skills, fitness, morale, injury_min, suspension, stats, selling, training_xp, seq, traits, focus, contract)
     VALUES ${players.map(() => row).join(", ")}`).run(...params);
 };
 
@@ -137,7 +135,7 @@ export const initClubForUser = async (userId, now = Date.now()) => {
   const inbox = safeJSON(meta.inbox, []);
   inbox.unshift({
     at: now, type: "welcome", title: "Bem-vindo!",
-    text: "A tua conta está online. As taças do teu nível abrem de 10 em 10 minutos e são partilhadas com outros managers reais — inscreve-te (uma de cada vez!) e aparece à hora dos jogos: tens 4 minutos para registar a equipa, senão perdes 3-0. Os jogadores ganham XP a jogar e tu distribui-lo no treino. Tens 3 agentes livres novos por dia desde já; vender jogadores abre no nível 3. O estádio começa com 0 lugares — constrói-o para ganhares bilheteira.",
+    text: "A tua conta está online. Entraste na liga: os jogos fazem-se à hora marcada, mesmo offline. As taças do teu escalão abrem de 30 em 30 minutos e são partilhadas com outros managers reais — inscreve-te (uma de cada vez!) e aparece à hora dos jogos: tens 4 minutos para registar a equipa, senão perdes 3-0. Os jogadores evoluem a jogar. Tens 3 agentes livres novos por dia desde já; vender jogadores abre no nível 3. O estádio começa com 0 lugares — constrói-o para ganhares bilheteira.",
   });
   await db.prepare("UPDATE meta SET inbox = ? WHERE user_id = ?").run(JSON.stringify(inbox), userId);
 };
@@ -149,23 +147,24 @@ export const loadGame = async (userId) => {
   const players = (await db.prepare("SELECT * FROM players WHERE user_id = ? ORDER BY seq, id").all(userId)).map(rowToPlayer);
   const m = await db.prepare("SELECT * FROM market WHERE user_id = ?").get(userId);
   const meta = await db.prepare("SELECT * FROM meta WHERE user_id = ?").get(userId);
+  const oldRep = (c.schema_v ?? 1) < 2 ? 4 : 1; // a reputação antiga valia menos pontos
   return {
     club: {
       name: identity.clubName, emblem: identity.emblem,
-      level: c.level, xp: c.xp, totalXp: c.total_xp, money: c.money, morale: c.morale, fans: c.fans,
+      level: c.level, xp: c.xp * oldRep, totalXp: c.total_xp * oldRep, money: c.money, morale: c.morale, fans: c.fans,
       buildings: { estadio: c.bld_estadio, treino: c.bld_treino, medico: c.bld_medico, academia: c.bld_academia },
     },
     players,
     lineup: { formation: c.formation, starters: safeJSON(c.starters, []) },
     tacticStyle: c.tactic_style,
     trainingFocus: c.training_focus,
-    market: { listings: safeJSON(m.listings, []), nextDripAt: m.next_drip_at },
+    market: { listings: safeJSON(m.listings, []).map((l) => ({ ...l, player: convertLegacyPlayer(l.player) })), nextDripAt: m.next_drip_at },
     account: safeJSON(meta.account, { wins: 0, draws: 0, losses: 0, trophies: [], createdAt: Date.now() }),
     inbox: safeJSON(meta.inbox, []),
     history: safeJSON(meta.history, []),
     flags: { trainBoostUntil: c.train_boost_until },
     nextYouthAt: c.next_youth_at, nextAgingAt: c.next_aging_at,
-    lastTick: c.last_tick, lastHourly: c.last_hourly,
+    lastTick: c.last_tick, lastHourly: c.last_hourly, nextPayAt: c.next_pay_at,
   };
 };
 
@@ -173,13 +172,13 @@ export const persistGame = async (userId, game) => {
   const c = game.club;
   await db.prepare(`UPDATE club SET money=?, level=?, xp=?, total_xp=?, morale=?, fans=?,
     bld_estadio=?, bld_treino=?, bld_medico=?, bld_academia=?, train_boost_until=?,
-    tactic_style=?, training_focus=?, formation=?, starters=?, next_youth_at=?, next_aging_at=?, last_tick=?, last_hourly=?
+    tactic_style=?, training_focus=?, formation=?, starters=?, next_youth_at=?, next_aging_at=?, last_tick=?, last_hourly=?, next_pay_at=?, schema_v=2
     WHERE user_id=?`).run(
     Math.round(c.money), c.level, Math.floor(c.xp), Math.floor(c.totalXp), c.morale, Math.round(c.fans),
     c.buildings.estadio, c.buildings.treino, c.buildings.medico, c.buildings.academia,
     game.flags?.trainBoostUntil ?? 0, game.tacticStyle, game.trainingFocus,
     game.lineup.formation, JSON.stringify(game.lineup.starters),
-    game.nextYouthAt ?? 0, game.nextAgingAt ?? 0, game.lastTick ?? Date.now(), game.lastHourly ?? Date.now(),
+    game.nextYouthAt ?? 0, game.nextAgingAt ?? 0, game.lastTick ?? Date.now(), game.lastHourly ?? Date.now(), game.nextPayAt ?? 0,
     userId
   );
   await db.prepare("DELETE FROM players WHERE user_id = ?").run(userId);
@@ -244,7 +243,7 @@ export const publicProfile = async (userId) => {
     trophies: game.account.trophies ?? [],
     createdAt: game.account.createdAt,
     squad: game.players.map((p) => ({
-      name: p.name, nat: p.nat, flag: p.flag, pos: p.pos, age: p.age, talent: p.talent, skills: p.skills,
+      name: p.name, nat: p.nat, flag: p.flag, pos: p.pos, age: p.age, pot: p.pot, skills: p.skills, traits: p.traits, contract: p.contract,
       fitness: Math.round(p.fitness), morale: Math.round(p.morale ?? 0), stats: p.stats,
     })),
   };
@@ -319,7 +318,7 @@ export const cancelSale = async (userId, playerId, now = Date.now()) => {
    (os ids de jogador não contêm ":"). */
 const publicPlayer = (p) => ({
   id: p.id, name: p.name, nat: p.nat, flag: p.flag, pos: p.pos, age: p.age,
-  talent: p.talent, skills: p.skills, fitness: Math.round(p.fitness),
+  pot: p.pot, skills: p.skills, traits: p.traits, contract: p.contract, fitness: Math.round(p.fitness),
   morale: Math.round(p.morale ?? 0), stats: p.stats,
   injuryMin: p.injuryMin ?? 0, suspension: p.suspension ?? 0,
 });
@@ -341,7 +340,7 @@ export const listTransfers = async (buyerId, { pos, limit = 120 } = {}) => {
     };
   });
   if (pos) items = items.filter((it) => it.player.pos === pos);
-  items.sort((a, b) => totalSkill(b.player) - totalSkill(a.player)); // melhores primeiro
+  items.sort((a, b) => overallBase(b.player) - overallBase(a.player)); // melhores primeiro
   return items.slice(0, Math.max(1, Math.min(200, limit)));
 };
 
@@ -371,7 +370,7 @@ export const buyTransfer = async (buyerId, listingId, now = Date.now()) => {
   }
 
   const soldPrice = sp.selling;
-  const bought = { ...sp };
+  const bought = { ...sp, contract: 3 };
   delete bought.selling;
 
   // sai do vendedor
@@ -425,11 +424,10 @@ export const buyBooster = async (userId, key, now = Date.now()) => {
   const b = BOOSTERS[key];
   if (!b) return { error: "invalido" };
   if (game.club.money < b.price) return { error: "dinheiro-insuficiente" };
-  if (key === "treino" && (game.flags.trainBoostUntil ?? 0) > now) return { error: "ja-ativo" };
   game.club.money -= b.price;
   if (key === "energia") for (const p of game.players) p.fitness = 100;
   if (key === "moral") game.club.morale = Math.min(100, game.club.morale + 18);
-  if (key === "treino") game.flags.trainBoostUntil = now + TRAIN_BOOST_MS;
+  if (key === "olheiro") game.market = refreshMarket({ ...game.market, nextDripAt: now }, Math.random, game.club.level, now);
   pushNews(game, "boost", b.label, `${b.icon} ${b.desc}`);
   await persistGame(userId, game);
   return { ok: true };
@@ -453,20 +451,38 @@ export const setStyle = async (userId, style, now = Date.now()) => {
   return { ok: true };
 };
 
-/* Distribuição manual de XP: o treinador escolhe QUAL atributo sobe, gastando
-   o XP banked do jogador (ganho a jogar — ver matchTrainingXp em progress.js).
-   Custo cresce com o valor atual (trainCost); teto plano SKILL_CAP (=25). */
-export const trainSkill = async (userId, playerId, skill, now = Date.now()) => {
+/* Foco de evolução escolhido pelo treinador (null = automático). */
+export const setFocus = async (userId, playerId, focus, now = Date.now()) => {
   const game = await tickClub(userId, now);
-  if (!SKILLS.includes(skill)) return { error: "atributo-invalido" };
-  const p = game.players.find((p) => p.id === playerId);
+  if (focus != null && !SKILLS.includes(focus)) return { error: "atributo-invalido" };
+  const p = game.players.find((x) => x.id === playerId);
   if (!p) return { error: "jogador-inexistente" };
-  const cur = p.skills[skill] ?? 0;
-  if (cur >= SKILL_CAP) return { error: "teto-atingido" };
-  const cost = trainCost(cur);
-  if ((p.trainingXp ?? 0) < cost) return { error: "xp-insuficiente" };
-  p.trainingXp -= cost;
-  p.skills[skill] = Math.min(SKILL_CAP, Math.floor(cur) + 1);
+  p.focus = focus ?? null;
   await persistGame(userId, game);
-  return { ok: true, newValue: p.skills[skill], remainingXp: p.trainingXp };
+  return { ok: true };
+};
+
+export const renewPlayer = async (userId, playerId, now = Date.now()) => {
+  const game = await tickClub(userId, now);
+  const p = game.players.find((x) => x.id === playerId);
+  if (!p) return { error: "jogador-inexistente" };
+  if (p.contract >= 5) return { error: "contrato-maximo" };
+  const cost = renewCost(p);
+  if (game.club.money < cost) return { error: "dinheiro-insuficiente" };
+  game.club.money -= cost;
+  p.contract = Math.min(5, p.contract + 2);
+  await persistGame(userId, game);
+  return { ok: true };
+};
+
+export const cupTierFor = async (userId, now = Date.now()) => cupTierOf(await userLevel(userId, now));
+
+/* Fim de época da liga: prémio, troféu e notícia. */
+export const creditSeasonOutcome = async (userId, { prize, rank, division, champion, promoted, relegated, season }, now = Date.now()) => {
+  const game = await tickClub(userId, now);
+  game.club.money += prize;
+  if (champion) game.account.trophies.push({ at: now, kind: "liga", label: `Campeão da Divisão ${division} (época ${season})`, level: division, icon: "🏆" });
+  const extra = promoted ? " Subiste de divisão!" : relegated ? " Desceste de divisão." : "";
+  pushNews(game, champion ? "trophy" : "cup", champion ? "CAMPEÃO!" : "Fim da época", `Terminaste em ${rank}.º na Divisão ${division} e recebeste ${prize}€.${extra}`);
+  await persistGame(userId, game);
 };

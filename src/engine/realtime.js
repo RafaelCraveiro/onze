@@ -8,7 +8,7 @@
    cliente recebe do servidor (game.cups). */
 
 import {
-  HOUR_MS, YOUTH_EVERY_MS, AGE_MS, isAgeBoundary, nextAgeBoundary, CUP_REG_WINDOW_MS,
+  HOUR_MS, YOUTH_EVERY_MS, AGE_MS, isAgeBoundary, nextAgeBoundary, CUP_REG_WINDOW_MS, PAY_EVERY_MS, wagePerDay, SQUAD_MIN,
   FITNESS_REGEN_PER_MIN, SQUAD_CAP, SKILLS,
 } from "./constants.js";
 import { YOU } from "./competitions.js";
@@ -108,8 +108,8 @@ const processUpkeep = (game, now, rng) => {
     if (game.players.length >= SQUAD_CAP) continue;
     const youth = genYouth(rng, game.club.buildings.academia);
     game.players.push(youth);
-    const star = youth.talent >= 7 ? " 🌟 UMA PÉROLA!" : youth.talent >= 5 ? " Grande promessa!" : "";
-    pushNews(game, "academy", "Jovem da academia", `${youth.name} (${youth.pos}, ${youth.age} anos, talento ${youth.talent})${star}`);
+    const star = youth.pot >= 85 ? " Uma joia rara!" : youth.pot >= 72 ? " Grande promessa!" : "";
+    pushNews(game, "academy", "Jovem da academia", `${youth.name} (${youth.pos}, ${youth.age} anos, potencial ${youth.pot})${star}`);
     changed = true;
   }
 
@@ -120,14 +120,37 @@ const processUpkeep = (game, now, rng) => {
     game.nextAgingAt += AGE_MS;
     for (const p of game.players) {
       p.age++;
-      if (p.age >= 30) for (const s of SKILLS) p.skills[s] = Math.max(1, p.skills[s] - 0.6);
+      p.contract = (p.contract ?? 3) - 1;
+      if (p.age >= 31) for (const s of SKILLS) p.skills[s] = Math.max(1, p.skills[s] - (s === "fisico" || s === "velocidade" ? 3 : s === "reflexos" ? 1 : 2));
     }
     const retiring = game.players.filter((p) => p.age >= 36);
     if (retiring.length && game.players.length - retiring.length >= 11) {
       game.players = game.players.filter((p) => p.age < 36);
       pushNews(game, "squad", "Fim de carreira", `${retiring.map((p) => p.name).join(", ")} pendurou(aram) as botas.`);
     }
-    pushNews(game, "squad", "Aniversários", "O plantel envelheceu um ano.");
+    // contratos acabados: o jogador sai, salvo se o plantel ficasse curto
+    const expired = game.players.filter((p) => p.contract <= 0).sort((a, b) => a.pot - b.pot);
+    const left = [];
+    for (const p of expired) {
+      if (game.players.length > SQUAD_MIN) { game.players = game.players.filter((x) => x.id !== p.id); left.push(p.name); }
+      else p.contract = 1;
+    }
+    if (left.length) pushNews(game, "squad", "Fim de contrato", `Saíram a custo zero: ${left.join(", ")}.`);
+    pushNews(game, "squad", "Nova época", "Os jogadores fizeram mais um ano e os contratos encurtaram uma época.");
+    changed = true;
+  }
+
+  // salários: pagos todos os dias, sem criar dívida a quem não tem dinheiro
+  if (!game.nextPayAt) { game.nextPayAt = now + PAY_EVERY_MS; changed = true; }
+  let days = 0;
+  while (now >= game.nextPayAt && days < 60) { days++; game.nextPayAt += PAY_EVERY_MS; }
+  if (now >= game.nextPayAt) game.nextPayAt = now + PAY_EVERY_MS;
+  if (days > 0) {
+    const bill = days * game.players.reduce((s, p) => s + wagePerDay(p), 0);
+    const paid = Math.min(Math.max(0, game.club.money), bill);
+    game.club.money -= paid;
+    pushNews(game, "money", "Salários", `Pagaste ${paid}€ em salários${paid < bill ? " (o dinheiro não chegou para tudo: a moral desce)." : "."}`);
+    if (paid < bill) game.club.morale = Math.max(5, game.club.morale - 8);
     changed = true;
   }
 

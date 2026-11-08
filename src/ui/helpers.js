@@ -12,17 +12,14 @@ export const fmtWhen = (ts) => {
   return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")} ${hm}`;
 };
 
-export const talentStars = (t) => "★".repeat(t);
-
 export const talentColor = (t) =>
-  t >= 8 ? "#b026c9" : t >= 7 ? "#dd9a06" : t >= 5 ? "#3d8c0e" : t >= 3 ? "#6b7261" : "#9aa08e";
+  t >= 85 ? "#d58bff" : t >= 75 ? "#f5b83d" : t >= 65 ? "#5fe08c" : t >= 55 ? "#aeb9c5" : "#8795a4";
 
 export const ratingColor = (r) =>
-  r >= 8 ? "#3d8c0e" : r >= 7 ? "#71a412" : r >= 6 ? "#c98d09" : "#c0392b";
+  r >= 8 ? "#5fe08c" : r >= 7 ? "#b6f23a" : r >= 6 ? "#f5b83d" : "#ff6b6f";
 
-// escala para o Skl = SOMA dos 8 atributos (máx. 8×25=200; plantel inicial ~60-105)
 export const overallColor = (o) =>
-  o >= 150 ? "#b026c9" : o >= 110 ? "#3d8c0e" : o >= 85 ? "#71a412" : o >= 60 ? "#c98d09" : "#8a9077";
+  o >= 85 ? "#d58bff" : o >= 72 ? "#5fe08c" : o >= 60 ? "#b6f23a" : o >= 45 ? "#f5b83d" : "#8795a4";
 
 // contraste simples entre duas cores hex (para kits não se confundirem)
 export const colorsClash = (a, b) => {

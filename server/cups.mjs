@@ -130,7 +130,7 @@ const startCup = async (cup, _now) => {
   let slot = ents.length;
   while (slot < cup.size) {
     // bot gerado na hora — "literalmente uma conta do sistema", sem pool a esgotar
-    const b = synthBot(cup.level, Math.floor(rng() * 1e9), String(slot + 1));
+    const b = synthBot(cup.level * 3, Math.floor(rng() * 1e9), String(slot + 1));
     await db.prepare("INSERT INTO cup_entrants (cup_id, slot, kind, bot_id, club_name, emblem, level, str) VALUES (?, ?, 'bot', ?, ?, ?, ?, ?)")
       .run(cup.id, slot, b.id, b.team, JSON.stringify(b.emblem), b.level, b.str);
     slot++;
@@ -268,7 +268,7 @@ export const matchResultFor = async (cupId, round, slot, _now = Date.now()) => {
 
 /* ---------- API (endpoints) ---------- */
 export const listCups = async (userId, now = Date.now()) => {
-  const level = await club.userLevel(userId, now);
+  const level = await club.cupTierFor(userId, now);
   await ensureUpcoming(level, now);
   await tick(now);
   const cups = [];
@@ -282,7 +282,7 @@ export const listCups = async (userId, now = Date.now()) => {
 };
 
 export const enroll = async (userId, cupId, now = Date.now()) => {
-  const level = await club.userLevel(userId, now);
+  const level = await club.cupTierFor(userId, now);
   await ensureUpcoming(level, now);
   await tick(now);
   const cup = await getCupRow(cupId);
