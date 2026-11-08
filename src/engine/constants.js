@@ -149,7 +149,12 @@ export const CUP_REG_WINDOW_MS = 4 * 60 * 1000;     // 4 minutos para registares
 // (se todos os jogos da ronda estiverem feitos, a seguinte abre IMEDIATAMENTE — sem espera)
 export const HOUR_MS = 60 * 60 * 1000;              // tick de manutenção (mercado, mundo)
 export const YOUTH_EVERY_MS = 6 * HOUR_MS;          // academia gera um jovem de 6 em 6 horas
-export const AGE_MS = 4 * 24 * HOUR_MS;             // os jogadores envelhecem +1 ano a cada 4 dias reais
+// Calendário ÚNICO do servidor: todos os jogadores fazem +1 ano nas mesmas datas, entrem ou não no jogo.
+export const AGE_MS = 15 * 24 * HOUR_MS;            // +1 ano a cada 15 dias reais (muda aqui o ritmo)
+export const AGE_EPOCH = Date.UTC(2026, 0, 1);      // origem do calendário; as datas são EPOCH + n × AGE_MS
+export const isAgeBoundary = (t) => (t - AGE_EPOCH) % AGE_MS === 0;
+export const lastAgeBoundary = (now) => AGE_EPOCH + Math.floor((now - AGE_EPOCH) / AGE_MS) * AGE_MS;
+export const nextAgeBoundary = (now) => lastAgeBoundary(now) + AGE_MS;
 export const FITNESS_REGEN_PER_MIN = 0.6;           // recupera de um jogo em ~40 min
 
 /* Experiência de jogo: os jogadores GANHAM XP ao jogar, consoante o talento

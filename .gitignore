@@ -7,3 +7,7 @@ dist/
 server/onze.db
 server/onze.db-wal
 server/onze.db-shm
+server/pgdata/
+
+# segredos (ligação à base de dados)
+.env

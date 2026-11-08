@@ -8,7 +8,7 @@
    cliente recebe do servidor (game.cups). */
 
 import {
-  HOUR_MS, YOUTH_EVERY_MS, AGE_MS, CUP_REG_WINDOW_MS,
+  HOUR_MS, YOUTH_EVERY_MS, AGE_MS, isAgeBoundary, nextAgeBoundary, CUP_REG_WINDOW_MS,
   FITNESS_REGEN_PER_MIN, SQUAD_CAP, SKILLS,
 } from "./constants.js";
 import { YOU } from "./competitions.js";
@@ -60,6 +60,8 @@ export const cupRoundName = (idx) => ["Quartos-de-final", "Meias-finais", "FINAL
 
 /* ==================== MANUTENÇÃO CONTÍNUA ==================== */
 
+const MAX_OFFLINE_YOUTHS = 4; // jovens da academia recebidos no máximo ao voltar de uma ausência
+
 const processUpkeep = (game, now, rng) => {
   let changed = false;
 
@@ -98,7 +100,10 @@ const processUpkeep = (game, now, rng) => {
 
   // academia: um jovem de X em X horas
   if (!game.nextYouthAt) { game.nextYouthAt = now + YOUTH_EVERY_MS; changed = true; }
+  let youthsDue = 0;
   while (now >= game.nextYouthAt) {
+    if (youthsDue >= MAX_OFFLINE_YOUTHS) { game.nextYouthAt = now + YOUTH_EVERY_MS; break; } // offline longo: perdoa o resto
+    youthsDue++;
     game.nextYouthAt += YOUTH_EVERY_MS;
     if (game.players.length >= SQUAD_CAP) continue;
     const youth = genYouth(rng, game.club.buildings.academia);
@@ -108,8 +113,9 @@ const processUpkeep = (game, now, rng) => {
     changed = true;
   }
 
-  // envelhecimento: +1 ano a cada AGE_MS reais
-  if (!game.nextAgingAt) { game.nextAgingAt = now + AGE_MS; changed = true; }
+  // envelhecimento: calendário único do servidor. Contas novas, ou ainda com o antigo
+  // relógio individual, entram na próxima data comum sem pagar anos passados.
+  if (!game.nextAgingAt || !isAgeBoundary(game.nextAgingAt)) { game.nextAgingAt = nextAgeBoundary(now); changed = true; }
   while (now >= game.nextAgingAt) {
     game.nextAgingAt += AGE_MS;
     for (const p of game.players) {

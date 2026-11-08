@@ -87,7 +87,9 @@ servidor devolve; nenhuma ação económica é aceite sem revalidação.
 
 ## 🥇 Prioridade 1: Deploy (para haver jogadores reais a sério)
 - [ ] Pôr online: Render/Railway free tier corre `npm run build && npm run server`
-      (porta via `process.env.PORT`, já suportado). SQLite precisa de disco persistente.
+      (porta via `process.env.PORT`, já suportado). Dados no Supabase: criar o projeto,
+      copiar `.env.example` para `.env`, correr `npm run migrar:supabase` e definir
+      `DATABASE_URL` no Render.
 - [ ] Sem isto, o multiplayer só funciona entre contas na mesma máquina.
 
 ## 🥈 Melhorias

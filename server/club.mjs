@@ -13,7 +13,7 @@
 import {
   STARTING_MONEY, SQUAD_MIN, SQUAD_CAP, BUILDINGS, buildingCost, BOOSTERS,
   TRAIN_BOOST_MS, MARKET_UNLOCK_LEVEL, FORMATIONS, STYLES,
-  SKILLS, SKILL_CAP, trainCost, totalSkill, playerValue,
+  SKILLS, SKILL_CAP, trainCost, totalSkill, playerValue, lastAgeBoundary,
 } from "../src/engine/constants.js";
 import { genInitialSquad } from "../src/engine/generation.js";
 import { autoPickXI, prepareUserTeam } from "../src/engine/team.js";
@@ -22,37 +22,40 @@ import { processTime } from "../src/engine/realtime.js";
 import { applyUserResult, pushNews } from "../src/engine/progress.js";
 
 let db;
-export const initClub = (database) => {
+export const initClub = async (database) => {
   db = database;
-  db.exec(`
+  await db.exec(`
     CREATE TABLE IF NOT EXISTS club (
-      user_id INTEGER PRIMARY KEY,
-      money INTEGER NOT NULL, level INTEGER NOT NULL, xp INTEGER NOT NULL, total_xp INTEGER NOT NULL,
-      morale REAL NOT NULL, fans INTEGER NOT NULL,
-      bld_estadio INTEGER NOT NULL, bld_treino INTEGER NOT NULL, bld_medico INTEGER NOT NULL, bld_academia INTEGER NOT NULL,
-      train_boost_until INTEGER NOT NULL DEFAULT 0,
+      user_id BIGINT PRIMARY KEY,
+      money DOUBLE PRECISION NOT NULL, level DOUBLE PRECISION NOT NULL, xp DOUBLE PRECISION NOT NULL, total_xp DOUBLE PRECISION NOT NULL,
+      morale DOUBLE PRECISION NOT NULL, fans DOUBLE PRECISION NOT NULL,
+      bld_estadio DOUBLE PRECISION NOT NULL, bld_treino DOUBLE PRECISION NOT NULL, bld_medico DOUBLE PRECISION NOT NULL, bld_academia DOUBLE PRECISION NOT NULL,
+      train_boost_until DOUBLE PRECISION NOT NULL DEFAULT 0,
       tactic_style TEXT NOT NULL DEFAULT 'equilibrado', training_focus TEXT NOT NULL DEFAULT 'misto',
       formation TEXT NOT NULL DEFAULT '4-4-2', starters TEXT NOT NULL DEFAULT '[]',
-      next_youth_at INTEGER NOT NULL DEFAULT 0, next_aging_at INTEGER NOT NULL DEFAULT 0,
-      last_tick INTEGER NOT NULL, last_hourly INTEGER NOT NULL
+      next_youth_at DOUBLE PRECISION NOT NULL DEFAULT 0, next_aging_at DOUBLE PRECISION NOT NULL DEFAULT 0,
+      last_tick DOUBLE PRECISION NOT NULL, last_hourly DOUBLE PRECISION NOT NULL
     );
     CREATE TABLE IF NOT EXISTS players (
-      id TEXT PRIMARY KEY, user_id INTEGER NOT NULL,
-      name TEXT, nat TEXT, flag TEXT, pos TEXT, age INTEGER, talent INTEGER,
-      skills TEXT NOT NULL, fitness REAL NOT NULL, morale REAL NOT NULL,
-      injury_min REAL NOT NULL, suspension INTEGER NOT NULL, stats TEXT NOT NULL, selling INTEGER,
-      training_xp INTEGER NOT NULL DEFAULT 0
+      id TEXT PRIMARY KEY, user_id BIGINT NOT NULL,
+      name TEXT, nat TEXT, flag TEXT, pos TEXT, age DOUBLE PRECISION, talent DOUBLE PRECISION,
+      skills TEXT NOT NULL, fitness DOUBLE PRECISION NOT NULL, morale DOUBLE PRECISION NOT NULL,
+      injury_min DOUBLE PRECISION NOT NULL, suspension DOUBLE PRECISION NOT NULL, stats TEXT NOT NULL, selling DOUBLE PRECISION,
+      training_xp DOUBLE PRECISION NOT NULL DEFAULT 0,
+      seq INT NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_players_user ON players(user_id);
+    CREATE INDEX IF NOT EXISTS idx_players_selling ON players(user_id) WHERE selling IS NOT NULL;
     CREATE TABLE IF NOT EXISTS market (
-      user_id INTEGER PRIMARY KEY, listings TEXT NOT NULL, next_drip_at INTEGER NOT NULL
+      user_id BIGINT PRIMARY KEY, listings TEXT NOT NULL, next_drip_at DOUBLE PRECISION NOT NULL
     );
     CREATE TABLE IF NOT EXISTS meta (
-      user_id INTEGER PRIMARY KEY, account TEXT NOT NULL, inbox TEXT NOT NULL, history TEXT NOT NULL, created_at INTEGER NOT NULL
+      user_id BIGINT PRIMARY KEY, account TEXT NOT NULL, inbox TEXT NOT NULL, history TEXT NOT NULL, created_at DOUBLE PRECISION NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS world_clock (
+      id INT PRIMARY KEY, aged_until DOUBLE PRECISION NOT NULL
     );
   `);
-  // migração leve: contas já existentes de antes do banco de XP manual não têm esta coluna
-  try { db.exec("ALTER TABLE players ADD COLUMN training_xp INTEGER NOT NULL DEFAULT 0"); } catch { /* já existe */ }
 };
 
 const safeJSON = (s, fallback = {}) => { try { return JSON.parse(s); } catch { return fallback; } };
@@ -67,30 +70,31 @@ const rowToPlayer = (row) => ({
   ...(row.selling != null ? { selling: row.selling } : {}),
 });
 
-const identityOf = (userId) => {
-  const u = db.prepare("SELECT club_name, emblem FROM users WHERE id = ?").get(userId);
+const identityOf = async (userId) => {
+  const u = await db.prepare("SELECT club_name, emblem FROM users WHERE id = ?").get(userId);
   return { clubName: u?.club_name ?? "Clube", emblem: safeJSON(u?.emblem, {}) };
 };
 
-const insertPlayers = (userId, players) => {
-  const stmt = db.prepare(`INSERT INTO players (id, user_id, name, nat, flag, pos, age, talent, skills, fitness, morale, injury_min, suspension, stats, selling, training_xp)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-  for (const p of players) {
-    stmt.run(
-      p.id, userId, p.name, p.nat, p.flag, p.pos, p.age, p.talent, JSON.stringify(p.skills ?? {}),
-      p.fitness ?? 100, p.morale ?? 0, p.injuryMin ?? 0, p.suspension ?? 0,
-      JSON.stringify(p.stats ?? { games: 0, goals: 0, assists: 0 }), p.selling ?? null, Math.max(0, Math.round(p.trainingXp ?? 0))
-    );
-  }
+// um único INSERT com todas as linhas: cada ida ao Supabase custa tempo de rede
+const insertPlayers = async (userId, players) => {
+  if (!players.length) return;
+  const row = `(${Array(17).fill("?").join(", ")})`;
+  const params = players.flatMap((p, seq) => [
+    p.id, userId, p.name, p.nat, p.flag, p.pos, p.age, p.talent, JSON.stringify(p.skills ?? {}),
+    p.fitness ?? 100, p.morale ?? 0, p.injuryMin ?? 0, p.suspension ?? 0,
+    JSON.stringify(p.stats ?? { games: 0, goals: 0, assists: 0 }), p.selling ?? null, Math.max(0, Math.round(p.trainingXp ?? 0)), seq,
+  ]);
+  await db.prepare(`INSERT INTO players (id, user_id, name, nat, flag, pos, age, talent, skills, fitness, morale, injury_min, suspension, stats, selling, training_xp, seq)
+    VALUES ${players.map(() => row).join(", ")}`).run(...params);
 };
 
 /* ---------- criação / migração ---------- */
-export const hasClub = (userId) => !!db.prepare("SELECT user_id FROM club WHERE user_id = ?").get(userId);
+export const hasClub = async (userId) => !!await db.prepare("SELECT user_id FROM club WHERE user_id = ?").get(userId);
 
-const migrateLegacy = (userId, save, now) => {
+const migrateLegacy = async (userId, save, now) => {
   const c = save.club ?? {};
   const b = c.buildings ?? {};
-  db.prepare(`INSERT INTO club (user_id, money, level, xp, total_xp, morale, fans, bld_estadio, bld_treino, bld_medico, bld_academia, train_boost_until, tactic_style, training_focus, formation, starters, next_youth_at, next_aging_at, last_tick, last_hourly)
+  await db.prepare(`INSERT INTO club (user_id, money, level, xp, total_xp, morale, fans, bld_estadio, bld_treino, bld_medico, bld_academia, train_boost_until, tactic_style, training_focus, formation, starters, next_youth_at, next_aging_at, last_tick, last_hourly)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
     userId, Math.round(c.money ?? STARTING_MONEY), c.level ?? 1, Math.floor(c.xp ?? 0), Math.floor(c.totalXp ?? 0),
     c.morale ?? 70, Math.round(c.fans ?? 100), b.estadio ?? 1, b.treino ?? 1, b.medico ?? 1, b.academia ?? 1,
@@ -98,10 +102,10 @@ const migrateLegacy = (userId, save, now) => {
     save.lineup?.formation ?? "4-4-2", JSON.stringify(save.lineup?.starters ?? []),
     save.nextYouthAt ?? 0, save.nextAgingAt ?? 0, save.lastTick ?? now, save.lastHourly ?? now
   );
-  insertPlayers(userId, save.players ?? []);
-  db.prepare("INSERT INTO market (user_id, listings, next_drip_at) VALUES (?, ?, ?)")
+  await insertPlayers(userId, save.players ?? []);
+  await db.prepare("INSERT INTO market (user_id, listings, next_drip_at) VALUES (?, ?, ?)")
     .run(userId, JSON.stringify(save.market?.listings ?? []), save.market?.nextDripAt ?? now);
-  db.prepare("INSERT INTO meta (user_id, account, inbox, history, created_at) VALUES (?, ?, ?, ?, ?)").run(
+  await db.prepare("INSERT INTO meta (user_id, account, inbox, history, created_at) VALUES (?, ?, ?, ?, ?)").run(
     userId,
     JSON.stringify({
       wins: save.account?.wins ?? 0, draws: save.account?.draws ?? 0, losses: save.account?.losses ?? 0,
@@ -111,40 +115,40 @@ const migrateLegacy = (userId, save, now) => {
   );
 };
 
-export const initClubForUser = (userId, now = Date.now()) => {
-  if (hasClub(userId)) return;
-  const legacy = db.prepare("SELECT data FROM saves WHERE user_id = ?").get(userId);
+export const initClubForUser = async (userId, now = Date.now()) => {
+  if (await hasClub(userId)) return;
+  const legacy = await db.prepare("SELECT data FROM saves WHERE user_id = ?").get(userId);
   if (legacy) {
-    try { migrateLegacy(userId, JSON.parse(legacy.data), now); return; } catch { /* cai para criação nova */ }
+    try { await migrateLegacy(userId, JSON.parse(legacy.data), now); return; } catch { /* cai para criação nova */ }
   }
   const players = genInitialSquad(Math.random);
   const starters = autoPickXI(players, "4-4-2");
-  db.prepare(`INSERT INTO club (user_id, money, level, xp, total_xp, morale, fans, bld_estadio, bld_treino, bld_medico, bld_academia, train_boost_until, tactic_style, training_focus, formation, starters, next_youth_at, next_aging_at, last_tick, last_hourly)
+  await db.prepare(`INSERT INTO club (user_id, money, level, xp, total_xp, morale, fans, bld_estadio, bld_treino, bld_medico, bld_academia, train_boost_until, tactic_style, training_focus, formation, starters, next_youth_at, next_aging_at, last_tick, last_hourly)
     VALUES (?, ?, 1, 0, 0, 70, 100, 0, 1, 1, 1, 0, 'equilibrado', 'misto', '4-4-2', ?, 0, 0, ?, ?)`)
     .run(userId, STARTING_MONEY, JSON.stringify(starters), now, now);
-  insertPlayers(userId, players);
-  db.prepare("INSERT INTO market (user_id, listings, next_drip_at) VALUES (?, '[]', ?)").run(userId, now);
-  db.prepare("INSERT INTO meta (user_id, account, inbox, history, created_at) VALUES (?, ?, '[]', '[]', ?)").run(
+  await insertPlayers(userId, players);
+  await db.prepare("INSERT INTO market (user_id, listings, next_drip_at) VALUES (?, '[]', ?)").run(userId, now);
+  await db.prepare("INSERT INTO meta (user_id, account, inbox, history, created_at) VALUES (?, ?, '[]', '[]', ?)").run(
     userId,
     JSON.stringify({ wins: 0, draws: 0, losses: 0, trophies: [], createdAt: now }),
     now
   );
-  const meta = db.prepare("SELECT inbox FROM meta WHERE user_id = ?").get(userId);
+  const meta = await db.prepare("SELECT inbox FROM meta WHERE user_id = ?").get(userId);
   const inbox = safeJSON(meta.inbox, []);
   inbox.unshift({
     at: now, type: "welcome", title: "Bem-vindo!",
     text: "A tua conta está online. As taças do teu nível abrem de 10 em 10 minutos e são partilhadas com outros managers reais — inscreve-te (uma de cada vez!) e aparece à hora dos jogos: tens 4 minutos para registar a equipa, senão perdes 3-0. Os jogadores ganham XP a jogar e tu distribui-lo no treino. Tens 3 agentes livres novos por dia desde já; vender jogadores abre no nível 3. O estádio começa com 0 lugares — constrói-o para ganhares bilheteira.",
   });
-  db.prepare("UPDATE meta SET inbox = ? WHERE user_id = ?").run(JSON.stringify(inbox), userId);
+  await db.prepare("UPDATE meta SET inbox = ? WHERE user_id = ?").run(JSON.stringify(inbox), userId);
 };
 
 /* ---------- carregar / gravar o estado completo ---------- */
-export const loadGame = (userId) => {
-  const identity = identityOf(userId);
-  const c = db.prepare("SELECT * FROM club WHERE user_id = ?").get(userId);
-  const players = db.prepare("SELECT * FROM players WHERE user_id = ?").all(userId).map(rowToPlayer);
-  const m = db.prepare("SELECT * FROM market WHERE user_id = ?").get(userId);
-  const meta = db.prepare("SELECT * FROM meta WHERE user_id = ?").get(userId);
+export const loadGame = async (userId) => {
+  const identity = await identityOf(userId);
+  const c = await db.prepare("SELECT * FROM club WHERE user_id = ?").get(userId);
+  const players = (await db.prepare("SELECT * FROM players WHERE user_id = ? ORDER BY seq, id").all(userId)).map(rowToPlayer);
+  const m = await db.prepare("SELECT * FROM market WHERE user_id = ?").get(userId);
+  const meta = await db.prepare("SELECT * FROM meta WHERE user_id = ?").get(userId);
   return {
     club: {
       name: identity.clubName, emblem: identity.emblem,
@@ -165,9 +169,9 @@ export const loadGame = (userId) => {
   };
 };
 
-export const persistGame = (userId, game) => {
+export const persistGame = async (userId, game) => {
   const c = game.club;
-  db.prepare(`UPDATE club SET money=?, level=?, xp=?, total_xp=?, morale=?, fans=?,
+  await db.prepare(`UPDATE club SET money=?, level=?, xp=?, total_xp=?, morale=?, fans=?,
     bld_estadio=?, bld_treino=?, bld_medico=?, bld_academia=?, train_boost_until=?,
     tactic_style=?, training_focus=?, formation=?, starters=?, next_youth_at=?, next_aging_at=?, last_tick=?, last_hourly=?
     WHERE user_id=?`).run(
@@ -178,44 +182,59 @@ export const persistGame = (userId, game) => {
     game.nextYouthAt ?? 0, game.nextAgingAt ?? 0, game.lastTick ?? Date.now(), game.lastHourly ?? Date.now(),
     userId
   );
-  db.prepare("DELETE FROM players WHERE user_id = ?").run(userId);
-  insertPlayers(userId, game.players);
-  db.prepare("UPDATE market SET listings = ?, next_drip_at = ? WHERE user_id = ?")
+  await db.prepare("DELETE FROM players WHERE user_id = ?").run(userId);
+  await insertPlayers(userId, game.players);
+  await db.prepare("UPDATE market SET listings = ?, next_drip_at = ? WHERE user_id = ?")
     .run(JSON.stringify(game.market.listings), game.market.nextDripAt ?? Date.now(), userId);
-  db.prepare("UPDATE meta SET account = ?, inbox = ?, history = ? WHERE user_id = ?")
+  await db.prepare("UPDATE meta SET account = ?, inbox = ?, history = ? WHERE user_id = ?")
     .run(JSON.stringify(game.account), JSON.stringify(game.inbox), JSON.stringify(game.history), userId);
 };
 
 /* ---------- tick de manutenção (energia, mercado, academia, envelhecimento) ---------- */
-export const tickClub = (userId, now = Date.now()) => {
-  initClubForUser(userId, now);
-  const game = loadGame(userId);
+export const tickClub = async (userId, now = Date.now()) => {
+  await initClubForUser(userId, now);
+  const game = await loadGame(userId);
   processTime(game, now, Math.random);
-  persistGame(userId, game);
+  await persistGame(userId, game);
   return game;
 };
 
-/* leituras leves (sem tick pesado) para outros módulos do servidor ---------- */
-export const userLevel = (userId, now = Date.now()) => {
-  initClubForUser(userId, now);
-  return db.prepare("SELECT level FROM club WHERE user_id = ?").get(userId)?.level ?? 1;
+/* ---------- calendário único: ao passar uma data de aniversário, TODAS as contas são
+   processadas de uma vez, para perfis e mercado mostrarem idades certas mesmo de quem
+   não entra. Corre no primeiro pedido depois da data (a memória evita idas à base). ---------- */
+let worldAgedUntil = 0;
+export const ageWorldIfDue = async (now = Date.now()) => {
+  const boundary = lastAgeBoundary(now);
+  if (worldAgedUntil >= boundary) return;
+  const clock = await db.prepare("SELECT aged_until FROM world_clock WHERE id = 1").get();
+  if (clock && clock.aged_until >= boundary) { worldAgedUntil = boundary; return; }
+  await db.tx(async () => {
+    for (const { user_id } of await db.prepare("SELECT user_id FROM club ORDER BY user_id").all()) await tickClub(user_id, now);
+    await db.prepare("INSERT INTO world_clock (id, aged_until) VALUES (1, ?) ON CONFLICT (id) DO UPDATE SET aged_until = EXCLUDED.aged_until").run(boundary);
+  });
 };
-export const userInfoFor = (userId, now = Date.now()) => {
-  initClubForUser(userId, now);
-  const identity = identityOf(userId);
-  const level = db.prepare("SELECT level FROM club WHERE user_id = ?").get(userId)?.level ?? 1;
+
+/* leituras leves (sem tick pesado) para outros módulos do servidor ---------- */
+export const userLevel = async (userId, now = Date.now()) => {
+  await initClubForUser(userId, now);
+  return (await db.prepare("SELECT level FROM club WHERE user_id = ?").get(userId))?.level ?? 1;
+};
+export const userInfoFor = async (userId, now = Date.now()) => {
+  await initClubForUser(userId, now);
+  const identity = await identityOf(userId);
+  const level = (await db.prepare("SELECT level FROM club WHERE user_id = ?").get(userId))?.level ?? 1;
   return { clubName: identity.clubName, emblem: JSON.stringify(identity.emblem), level };
 };
 
 /* ---------- equipa para simular (taças + amigáveis) ---------- */
-export const buildXITeam = (userId, now = Date.now()) => prepareUserTeam(tickClub(userId, now));
+export const buildXITeam = async (userId, now = Date.now()) => prepareUserTeam(await tickClub(userId, now));
 
 /* ---------- perfil PÚBLICO de um manager (visível por qualquer conta) ----------
    Só informação não sensível: emblema, nível, registo, troféus e plantel
    (sem preços de venda, dinheiro, XP banked nem inbox). */
-export const publicProfile = (userId) => {
-  if (!hasClub(userId)) return null;
-  const game = loadGame(userId);
+export const publicProfile = async (userId) => {
+  if (!await hasClub(userId)) return null;
+  const game = await loadGame(userId);
   return {
     clubName: game.club.name,
     emblem: game.club.emblem,
@@ -232,15 +251,15 @@ export const publicProfile = (userId) => {
 };
 
 /* ---------- aplicar o resultado de um jogo (evolução + XP + dinheiro) ---------- */
-export const applyMatchResult = (userId, { kind, isHome, result, oppName }, now = Date.now()) => {
-  const game = tickClub(userId, now);
+export const applyMatchResult = async (userId, { kind, isHome, result, oppName }, now = Date.now()) => {
+  const game = await tickClub(userId, now);
   const outcome = applyUserResult(game, { kind, userSide: isHome ? "H" : "A", result, oppName, isHome, forfeit: !!result.forfeit });
-  persistGame(userId, game);
+  await persistGame(userId, game);
   return outcome;
 };
 
-export const creditCupOutcome = (userId, { prize, isWinner, cupName, cupLevel, cupIcon }, now = Date.now()) => {
-  const game = tickClub(userId, now);
+export const creditCupOutcome = async (userId, { prize, isWinner, cupName, cupLevel, cupIcon }, now = Date.now()) => {
+  const game = await tickClub(userId, now);
   game.club.money += prize;
   if (isWinner) {
     game.account.trophies.push({ at: now, kind: "taca", label: cupName, level: cupLevel, icon: cupIcon });
@@ -248,13 +267,13 @@ export const creditCupOutcome = (userId, { prize, isWinner, cupName, cupLevel, c
   } else {
     pushNews(game, "cup", "Finalista", `Perdeste a final da ${cupName}. Prémio de finalista: ${prize}€.`);
   }
-  persistGame(userId, game);
+  await persistGame(userId, game);
 };
 
 /* ---------- ações económicas (todas re-validadas aqui, nunca no cliente) ---------- */
 /* Agentes livres: compráveis desde o NÍVEL 1 (não pertencem a treinadores reais). */
-export const buyListing = (userId, listingId, now = Date.now()) => {
-  const game = tickClub(userId, now);
+export const buyListing = async (userId, listingId, now = Date.now()) => {
+  const game = await tickClub(userId, now);
   const listing = game.market.listings.find((l) => l.id === listingId);
   if (!listing) return { error: "listagem-inexistente" };
   const block = canBuy(game, listing);
@@ -263,15 +282,15 @@ export const buyListing = (userId, listingId, now = Date.now()) => {
   game.players.push(listing.player);
   game.market.listings = game.market.listings.filter((l) => l.id !== listingId);
   pushNews(game, "transfer", "Contratação", `${listing.player.name} chegou ao clube como agente livre, por ${listing.price}€.`);
-  persistGame(userId, game);
+  await persistGame(userId, game);
   return { ok: true };
 };
 
 /* Pôr à venda no mercado de transferências: só a partir de MARKET_UNLOCK_LEVEL.
    O jogador fica no plantel (ainda jogável) mas visível para todos os outros
    managers em listTransfers — sai só quando alguém o comprar (buyTransfer). */
-export const sellPlayer = (userId, playerId, price, now = Date.now()) => {
-  const game = tickClub(userId, now);
+export const sellPlayer = async (userId, playerId, price, now = Date.now()) => {
+  const game = await tickClub(userId, now);
   if (game.club.level < MARKET_UNLOCK_LEVEL) return { error: "mercado-bloqueado" };
   const block = canSell(game);
   if (block) return { error: "nao-permitido", detail: block };
@@ -280,15 +299,15 @@ export const sellPlayer = (userId, playerId, price, now = Date.now()) => {
   // teto generoso (evita "lavar" dinheiro entre contas com preços absurdos)
   const cap = Math.max(20000, playerValue(p) * 30);
   p.selling = Math.max(50, Math.min(cap, Math.round(price)));
-  persistGame(userId, game);
+  await persistGame(userId, game);
   return { ok: true };
 };
 
-export const cancelSale = (userId, playerId, now = Date.now()) => {
-  const game = tickClub(userId, now);
+export const cancelSale = async (userId, playerId, now = Date.now()) => {
+  const game = await tickClub(userId, now);
   const p = game.players.find((p) => p.id === playerId);
   if (p) delete p.selling;
-  persistGame(userId, game);
+  await persistGame(userId, game);
   return { ok: true };
 };
 
@@ -305,8 +324,8 @@ const publicPlayer = (p) => ({
   injuryMin: p.injuryMin ?? 0, suspension: p.suspension ?? 0,
 });
 
-export const listTransfers = (buyerId, { pos, limit = 120 } = {}) => {
-  const rows = db.prepare(`
+export const listTransfers = async (buyerId, { pos, limit = 120 } = {}) => {
+  const rows = await db.prepare(`
     SELECT p.*, u.club_name AS seller_name, u.emblem AS seller_emblem
     FROM players p JOIN users u ON u.id = p.user_id
     WHERE p.selling IS NOT NULL AND p.user_id != ?
@@ -326,7 +345,7 @@ export const listTransfers = (buyerId, { pos, limit = 120 } = {}) => {
   return items.slice(0, Math.max(1, Math.min(200, limit)));
 };
 
-export const buyTransfer = (buyerId, listingId, now = Date.now()) => {
+export const buyTransfer = async (buyerId, listingId, now = Date.now()) => {
   const sep = String(listingId).indexOf(":");
   if (sep < 0) return { error: "listagem-inexistente" };
   const sellerId = Number(String(listingId).slice(0, sep));
@@ -334,20 +353,20 @@ export const buyTransfer = (buyerId, listingId, now = Date.now()) => {
   if (!Number.isInteger(sellerId) || sellerId === buyerId) return { error: "listagem-inexistente" };
 
   // valida a listagem contra a fonte de verdade (o jogador do vendedor, com selling)
-  const row = db.prepare("SELECT selling FROM players WHERE user_id = ? AND id = ?").get(sellerId, playerId);
+  const row = await db.prepare("SELECT selling FROM players WHERE user_id = ? AND id = ?").get(sellerId, playerId);
   if (!row || row.selling == null) return { error: "listagem-inexistente" };
 
-  const buyer = tickClub(buyerId, now);
+  const buyer = await tickClub(buyerId, now);
   if (buyer.players.length >= SQUAD_CAP) return { error: "plantel-cheio" };
   if (buyer.club.money < row.selling) return { error: "dinheiro-insuficiente" };
 
-  const seller = tickClub(sellerId, now);
+  const seller = await tickClub(sellerId, now);
   const sp = seller.players.find((x) => x.id === playerId);
   if (!sp || sp.selling == null) return { error: "listagem-inexistente" }; // mudou durante o tick
   if (seller.players.length <= SQUAD_MIN) {
     // vender deixaria o vendedor abaixo do mínimo — retira a listagem em vez de vender
     delete sp.selling;
-    persistGame(sellerId, seller);
+    await persistGame(sellerId, seller);
     return { error: "listagem-indisponivel" };
   }
 
@@ -368,31 +387,26 @@ export const buyTransfer = (buyerId, listingId, now = Date.now()) => {
 
   // ORDEM CRÍTICA: `players.id` é PK global — apagar do vendedor ANTES de inserir
   // no comprador, ou a mesma linha colidiria. Tudo numa transação (atomicidade).
-  db.exec("BEGIN");
-  try {
-    persistGame(sellerId, seller);
-    persistGame(buyerId, buyer);
-    db.exec("COMMIT");
-  } catch {
-    db.exec("ROLLBACK");
-    return { error: "erro-transferencia" };
-  }
+  await db.tx(async () => {
+    await persistGame(sellerId, seller);
+    await persistGame(buyerId, buyer);
+  });
   return { ok: true, player: bought.name, price: soldPrice };
 };
 
-export const releasePlayer = (userId, playerId, now = Date.now()) => {
-  const game = tickClub(userId, now);
+export const releasePlayer = async (userId, playerId, now = Date.now()) => {
+  const game = await tickClub(userId, now);
   if (game.players.length <= SQUAD_MIN) return { error: "nao-permitido", detail: "Plantel no mínimo." };
   const p = game.players.find((p) => p.id === playerId);
   if (!p) return { error: "jogador-inexistente" };
   game.players = game.players.filter((x) => x.id !== playerId);
   pushNews(game, "squad", "Dispensa", `${p.name} deixou o clube.`);
-  persistGame(userId, game);
+  await persistGame(userId, game);
   return { ok: true };
 };
 
-export const upgradeBuilding = (userId, key, now = Date.now()) => {
-  const game = tickClub(userId, now);
+export const upgradeBuilding = async (userId, key, now = Date.now()) => {
+  const game = await tickClub(userId, now);
   const b = BUILDINGS[key];
   if (!b) return { error: "invalido" };
   const lvl = game.club.buildings[key];
@@ -402,12 +416,12 @@ export const upgradeBuilding = (userId, key, now = Date.now()) => {
   game.club.money -= cost;
   game.club.buildings[key] = lvl + 1;
   pushNews(game, "club", "Obra concluída", `${b.label} melhorado para o nível ${lvl + 1}.`);
-  persistGame(userId, game);
+  await persistGame(userId, game);
   return { ok: true };
 };
 
-export const buyBooster = (userId, key, now = Date.now()) => {
-  const game = tickClub(userId, now);
+export const buyBooster = async (userId, key, now = Date.now()) => {
+  const game = await tickClub(userId, now);
   const b = BOOSTERS[key];
   if (!b) return { error: "invalido" };
   if (game.club.money < b.price) return { error: "dinheiro-insuficiente" };
@@ -417,33 +431,33 @@ export const buyBooster = (userId, key, now = Date.now()) => {
   if (key === "moral") game.club.morale = Math.min(100, game.club.morale + 18);
   if (key === "treino") game.flags.trainBoostUntil = now + TRAIN_BOOST_MS;
   pushNews(game, "boost", b.label, `${b.icon} ${b.desc}`);
-  persistGame(userId, game);
+  await persistGame(userId, game);
   return { ok: true };
 };
 
-export const setLineup = (userId, { formation, starters }, now = Date.now()) => {
-  const game = tickClub(userId, now);
+export const setLineup = async (userId, { formation, starters }, now = Date.now()) => {
+  const game = await tickClub(userId, now);
   if (formation && FORMATIONS[formation]) game.lineup.formation = formation;
   if (Array.isArray(starters)) {
     const owned = new Set(game.players.map((p) => p.id));
     game.lineup.starters = starters.filter((id) => owned.has(id)).slice(0, 11);
   }
-  persistGame(userId, game);
+  await persistGame(userId, game);
   return { ok: true };
 };
 
-export const setStyle = (userId, style, now = Date.now()) => {
-  const game = tickClub(userId, now);
+export const setStyle = async (userId, style, now = Date.now()) => {
+  const game = await tickClub(userId, now);
   if (STYLES[style]) game.tacticStyle = style;
-  persistGame(userId, game);
+  await persistGame(userId, game);
   return { ok: true };
 };
 
 /* Distribuição manual de XP: o treinador escolhe QUAL atributo sobe, gastando
    o XP banked do jogador (ganho a jogar — ver matchTrainingXp em progress.js).
    Custo cresce com o valor atual (trainCost); teto plano SKILL_CAP (=25). */
-export const trainSkill = (userId, playerId, skill, now = Date.now()) => {
-  const game = tickClub(userId, now);
+export const trainSkill = async (userId, playerId, skill, now = Date.now()) => {
+  const game = await tickClub(userId, now);
   if (!SKILLS.includes(skill)) return { error: "atributo-invalido" };
   const p = game.players.find((p) => p.id === playerId);
   if (!p) return { error: "jogador-inexistente" };
@@ -453,6 +467,6 @@ export const trainSkill = (userId, playerId, skill, now = Date.now()) => {
   if ((p.trainingXp ?? 0) < cost) return { error: "xp-insuficiente" };
   p.trainingXp -= cost;
   p.skills[skill] = Math.min(SKILL_CAP, Math.floor(cur) + 1);
-  persistGame(userId, game);
+  await persistGame(userId, game);
   return { ok: true, newValue: p.skills[skill], remainingXp: p.trainingXp };
 };
