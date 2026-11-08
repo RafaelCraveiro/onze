@@ -1,51 +1,57 @@
-/* Viewer 2D do jogo completo — canvas + requestAnimationFrame.
-   REALISMO: a bola circula de PÉ EM PÉ (passes entre jogadores reais), com
-   portador destacado, rasto nos remates e flash no momento do passe.
-   A simulação já decidiu tudo; isto é cenografia sobre live.timeline. */
+/* Viewer 2D — RENDERIZADOR sobre o motor de coreografia (pitchSim.js).
+   O motor produz movimento contínuo dos 22 agentes + bola (steering, passes,
+   pressing, lances com script); aqui só lemos `sim.state` e pintamos: campo,
+   câmara broadcast a seguir a bola, jogadores, bola, banners e confettis.
+   A simulação estatística (live.result) continua a ser a única fonte de verdade. */
 
 import { useEffect, useRef, useState } from "react";
 import Emblem from "./Emblem.jsx";
 import { colorsClash } from "../helpers.js";
-import { lineOf } from "../../engine/constants.js";
+import { createPitchSim } from "./pitchSim.js";
 
-const lerp = (a, b, t) => a + (b - a) * t;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const ease = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
-
-const pathPosZ = (path, t) => {
-  if (!path || path.length === 0) return [0.5, 0.5, 0];
-  if (t <= path[0][0]) return [path[0][1], path[0][2], 0];
-  for (let i = 1; i < path.length; i++) {
-    if (t <= path[i][0]) {
-      const p0 = path[i - 1], p1 = path[i];
-      const k = ease((t - p0[0]) / (p1[0] - p0[0] || 1));
-      const dist = Math.hypot(p1[1] - p0[1], p1[2] - p0[2]);
-      const maxZ = dist > 0.16 ? Math.min(0.08, dist * 0.28) : 0;
-      return [lerp(p0[1], p1[1], k), lerp(p0[2], p1[2], k), maxZ * 4 * k * (1 - k)];
-    }
-  }
-  const l = path[path.length - 1];
-  return [l[1], l[2], 0];
-};
-
-/* Posições-base por linhas (independente da formação exata). */
-const baseSpots = (xi, homeSide) => {
-  const lines = { GR: [], DF: [], MD: [], AV: [] };
-  xi.forEach((p, i) => lines[lineOf(p.pos)].push(i));
-  const X = { GR: 0.045, DF: 0.19, MD: 0.38, AV: 0.6 };
-  const out = Array.from({ length: xi.length });
-  for (const [pos, idxs] of Object.entries(lines)) {
-    idxs.forEach((idx, j) => {
-      const y = idxs.length === 1 ? 0.5 : 0.14 + (0.72 * j) / (idxs.length - 1);
-      const x = homeSide ? X[pos] : 1 - X[pos];
-      out[idx] = [x, y];
-    });
-  }
-  return out;
-};
+const lerp = (a, b, t) => a + (b - a) * t;
 
 const FEED_ICON = { goal: "⚽", chance: "🥅", yellow: "🟨", red: "🟥", injury: "🚑", info: "▪️" };
-const TRAVEL = 0.62; // fração de cada passe em viagem (o resto é controlo do recetor)
+
+/* Sons sintetizados (Web Audio) — zero ficheiros externos. Toque na bola, remate,
+   golo, defesa e apito. Devolve null se o browser não tiver Web Audio. */
+const makeAudio = () => {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return null;
+  const ac = new AC();
+  const master = ac.createGain(); master.gain.value = 0.5; master.connect(ac.destination);
+  const tone = (f0, f1, dur, g, type = "sine", delay = 0) => {
+    const t0 = ac.currentTime + delay;
+    const o = ac.createOscillator(); o.type = type;
+    o.frequency.setValueAtTime(f0, t0);
+    if (f1 !== f0) o.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t0 + dur);
+    const gg = ac.createGain();
+    gg.gain.setValueAtTime(0.0001, t0);
+    gg.gain.exponentialRampToValueAtTime(g, t0 + 0.006);
+    gg.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    o.connect(gg).connect(master); o.start(t0); o.stop(t0 + dur + 0.02);
+  };
+  const noise = (dur, g, delay = 0) => {
+    const t0 = ac.currentTime + delay;
+    const n = Math.max(1, Math.floor(ac.sampleRate * dur));
+    const buf = ac.createBuffer(1, n, ac.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
+    const src = ac.createBufferSource(); src.buffer = buf;
+    const gg = ac.createGain(); gg.gain.value = g;
+    const hp = ac.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 1100;
+    src.connect(hp).connect(gg).connect(master); src.start(t0);
+  };
+  return {
+    ctx: ac,
+    kick() { tone(190, 90, 0.09, 0.3, "sine"); noise(0.03, 0.1); },
+    shot() { tone(240, 80, 0.13, 0.5, "sine"); noise(0.05, 0.18); },
+    goal() { tone(523, 523, 0.15, 0.36, "triangle"); tone(659, 659, 0.15, 0.36, "triangle", 0.12); tone(784, 784, 0.34, 0.42, "triangle", 0.24); noise(0.5, 0.06, 0.02); },
+    save() { tone(300, 150, 0.1, 0.28, "sine"); noise(0.03, 0.1); },
+    whistle() { tone(1950, 2080, 0.18, 0.22, "square"); tone(1950, 1780, 0.12, 0.18, "square", 0.17); },
+  };
+};
 
 export default function MatchViewer2D({ live, club, onFinish }) {
   const canvasRef = useRef(null);
@@ -55,15 +61,19 @@ export default function MatchViewer2D({ live, club, onFinish }) {
   const [done, setDone] = useState(false);
   const [playing, setPlaying] = useState(true);
   const [speed, setSpeed] = useState(1);
+  const [muted, setMuted] = useState(false);
 
-  const S = useRef({
-    idx: 0, t: 0, playing: true, speed: 1, removed: new Set(),
-    particles: [], done: false, lastNow: 0, wanderSeed: Math.random() * 100,
-    plan: null, planIdx: -1, trail: [],
-  }).current;
-
-  const { result, timeline, opp, isHome } = live;
-  const scenes = timeline.scenes;
+  const { result, opp, isHome } = live;
+  const R = useRef(null);
+  if (!R.current) {
+    R.current = {
+      sim: createPitchSim(result),
+      cam: { x: 0.5, y: 0.5, z: 1.08 }, trail: [], particles: [], lastGoal: 0,
+      lastNow: 0, playing: true, speed: 1, muted: false, done: false, finished: false,
+      audio: null, lastKick: 0,
+    };
+  }
+  const S = R.current;
 
   const homeInfo = isHome ? { name: club.name, emblem: club.emblem } : { name: opp.team, emblem: opp.emblem };
   const awayInfo = isHome ? { name: opp.team, emblem: opp.emblem } : { name: club.name, emblem: club.emblem };
@@ -72,364 +82,214 @@ export default function MatchViewer2D({ live, club, onFinish }) {
   if (colorsClash(kitH, kitA)) kitA = colorsClash("#f8fafc", kitH) ? "#0f172a" : "#f8fafc";
 
   useEffect(() => {
-    S.playing = playing;
-    S.speed = speed;
-  }, [playing, speed, S]);
+    S.playing = playing; S.speed = speed; S.muted = muted;
+    if (!muted) S.audio?.ctx.resume?.().catch(() => {});
+  }, [playing, speed, muted, S]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     const W = 720, Hh = 460;
-    canvas.width = W * dpr;
-    canvas.height = Hh * dpr;
+    canvas.width = W * dpr; canvas.height = Hh * dpr;
     ctx.scale(dpr, dpr);
-
-    const spotsH = baseSpots(result.homeXI, true);
-    const spotsA = baseSpots(result.awayXI, false);
-    const xiOf = (k) => (k === "H" ? result.homeXI : result.awayXI);
-    const spotsOf = (k) => (k === "H" ? spotsH : spotsA);
-    const slotOfPid = (sideKey, pid) => xiOf(sideKey).findIndex((p) => p.id === pid);
-
-    /* ---------- plano de cena: passes ancorados em jogadores reais ---------- */
-    const buildPlan = (sc) => {
-      const plan = { kind: sc?.kind, nodes: null, anchors: [] };
-      if (sc?.kind === "flow") {
-        const sideKey = sc.side;
-        const xi = xiOf(sideKey), spots = spotsOf(sideKey);
-        const dir = sideKey === "H" ? 1 : -1;
-        const idxs = xi.map((_, i) => i).filter((i) => lineOf(xi[i].pos) !== "GR" && !S.removed.has(xi[i].id));
-        if (idxs.length >= 3) {
-          const used = new Set();
-          // começa atrás (defesa/meio) e vai passando tendencialmente para a frente
-          let cur = idxs.slice().sort((a, b) => (spots[a][0] - spots[b][0]) * dir)[Math.floor(Math.random() * Math.min(4, idxs.length))];
-          const nodes = [];
-          const nPasses = 3 + Math.floor(Math.random() * 3);
-          for (let j = 0; j <= nPasses; j++) {
-            used.add(cur);
-            const [sx, sy] = spots[cur];
-            nodes.push({
-              slot: cur,
-              x: clamp(sx + (Math.random() - 0.5) * 0.07, 0.05, 0.95),
-              y: clamp(sy + (Math.random() - 0.5) * 0.1, 0.06, 0.94),
-            });
-            const cands = idxs.filter((i) => !used.has(i));
-            if (!cands.length) break;
-            // prefere colegas próximos e ligeiramente mais adiantados
-            cands.sort((a, b) => {
-              const da = Math.hypot(spots[a][0] - sx, spots[a][1] - sy) - (spots[a][0] - sx) * dir * 0.6;
-              const db = Math.hypot(spots[b][0] - sx, spots[b][1] - sy) - (spots[b][0] - sx) * dir * 0.6;
-              return da - db;
-            });
-            cur = cands[Math.floor(Math.random() * Math.min(3, cands.length))];
-          }
-          plan.nodes = nodes;
-        }
-      } else if (["goal", "save", "miss", "corner"].includes(sc?.kind) && sc.ball?.length > 2) {
-        // ancora atacantes aos pontos por onde a bola vai passar (jogada com passes reais)
-        const sideKey = sc.side;
-        const xi = xiOf(sideKey), spots = spotsOf(sideKey);
-        const used = new Set([slotOfPid(sideKey, sc.scorerPid), slotOfPid(sideKey, sc.assistPid), slotOfPid(sideKey, sc.pid)].filter((i) => i >= 0));
-        for (const [t, x, y] of sc.ball.slice(0, -1)) {
-          let best = -1, bestD = 0.55;
-          for (let i = 0; i < xi.length; i++) {
-            if (used.has(i) || S.removed.has(xi[i].id) || lineOf(xi[i].pos) === "GR") continue;
-            const d = Math.hypot(spots[i][0] - x, spots[i][1] - y);
-            if (d < bestD) { bestD = d; best = i; }
-          }
-          if (best >= 0) { used.add(best); plan.anchors.push({ slot: best, x, y, t }); }
-        }
-      }
-      S.plan = plan;
-      S.planIdx = S.idx;
-      S.trail = [];
-    };
-
-    /* posição da bola numa cena de circulação (nó a nó, com viagem + controlo) */
-    const flowBall = (nodes, k) => {
-      const legs = nodes.length - 1;
-      if (legs < 1) return { x: nodes[0].x, y: nodes[0].y, z: 0, holder: nodes[0].slot, from: null, travelK: 1 };
-      const per = 1 / legs;
-      const li = Math.min(legs - 1, Math.floor(k / per));
-      const lk = (k - li * per) / per;
-      const a = nodes[li], b = nodes[li + 1];
-      if (lk < TRAVEL) {
-        const t = ease(lk / TRAVEL);
-        const dist = Math.hypot(b.x - a.x, b.y - a.y);
-        const z = dist > 0.14 ? Math.min(0.06, dist * 0.25) * 4 * t * (1 - t) : 0;
-        return { x: lerp(a.x, b.x, t), y: lerp(a.y, b.y, t), z, holder: null, from: a, to: b, travelK: t };
-      }
-      const w = Math.sin(k * 40 + S.wanderSeed) * 0.006;
-      return { x: b.x + w, y: b.y + w, z: 0, holder: b.slot, from: null, travelK: 1 };
-    };
-
-    const completeScene = (sc) => {
-      if (sc.text) setFeed((f) => [{ min: Math.round(sc.minEnd ?? sc.min ?? 0), text: sc.text, type: sc.feedType ?? sc.kind }, ...f]);
-      if (sc.score) setScore(sc.score);
-      if (sc.removePid) S.removed.add(sc.removePid);
-      if (sc.kind === "goal") {
-        const color = sc.side === "H" ? kitH : kitA;
-        for (let i = 0; i < 60; i++) {
-          S.particles.push({
-            x: Math.random(), y: -0.05 - Math.random() * 0.3,
-            vy: 0.15 + Math.random() * 0.25, vx: (Math.random() - 0.5) * 0.1,
-            color: Math.random() < 0.5 ? color : "#f8fafc", life: 2.5,
-          });
-        }
-      }
-    };
-
-    const finishAll = () => {
-      while (S.idx < scenes.length) { completeScene(scenes[S.idx]); S.idx++; }
-      S.done = true;
-      setDone(true);
-      setMinute(90);
-    };
-    S.finishAll = finishAll;
 
     const px = (x) => 20 + x * (W - 40);
     const py = (y) => 16 + y * (Hh - 60);
+    const PW = px(1) - px(0), PHt = py(1) - py(0);
+    const sim = S.sim, st = sim.state;
+
+    // áudio (entrámos no jogo por um clique → o AudioContext pode arrancar)
+    if (!S.audio) { try { S.audio = makeAudio(); } catch { S.audio = null; } }
+    S.audio?.ctx.resume?.().catch(() => {});
+    const playSfx = (now) => {
+      if (!st.sfx.length) return;
+      for (const k of st.sfx) {
+        if (S.muted || !S.audio) continue;
+        if (k === "kick") { if (now - S.lastKick < 55) continue; S.lastKick = now; }
+        S.audio[k]?.();
+      }
+      st.sfx.length = 0;
+    };
+
+    const applyCam = () => {
+      const z = S.cam.z;
+      const halfW = (W / 2) / z, halfH = (Hh / 2) / z;
+      const fx = px(S.cam.x), fy = py(S.cam.y);
+      const minX = px(0) + halfW - 40, maxX = px(1) - halfW + 40;
+      const minY = py(0) + halfH - 30, maxY = py(1) - halfH + 30;
+      const cx = minX <= maxX ? clamp(fx, minX, maxX) : W / 2;
+      const cy = minY <= maxY ? clamp(fy, minY, maxY) : Hh / 2;
+      ctx.translate(W / 2, Hh / 2); ctx.scale(z, z); ctx.translate(-cx, -cy);
+    };
 
     const drawPitch = () => {
-      ctx.fillStyle = "#14532d";
-      ctx.fillRect(0, 0, W, Hh);
-      for (let i = 0; i < 10; i++) {
-        ctx.fillStyle = i % 2 ? "#166534" : "#15803d22";
-        ctx.fillRect(20 + (i * (W - 40)) / 10, 16, (W - 40) / 10, Hh - 60);
+      const g = ctx.createLinearGradient(0, 0, 0, Hh);
+      g.addColorStop(0, "#1e8043"); g.addColorStop(1, "#15612f");
+      ctx.fillStyle = g; ctx.fillRect(0, 0, W, Hh);
+      for (let i = 0; i < 12; i++) {
+        ctx.fillStyle = i % 2 ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)";
+        ctx.fillRect(px(0) + (i * PW) / 12, py(0), PW / 12, PHt);
       }
-      ctx.strokeStyle = "rgba(255,255,255,0.75)";
-      ctx.lineWidth = 2;
-      ctx.strokeRect(px(0), py(0), px(1) - px(0), py(1) - py(0));
+      ctx.strokeStyle = "rgba(255,255,255,0.8)"; ctx.lineWidth = 2;
+      ctx.strokeRect(px(0), py(0), PW, PHt);
       ctx.beginPath(); ctx.moveTo(px(0.5), py(0)); ctx.lineTo(px(0.5), py(1)); ctx.stroke();
-      ctx.beginPath(); ctx.arc(px(0.5), py(0.5), 42, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(px(0.5), py(0.5), 44, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(px(0.5), py(0.5), 3, 0, Math.PI * 2); ctx.fillStyle = "rgba(255,255,255,0.85)"; ctx.fill();
+      for (const cx of [px(0), px(1)]) for (const cy of [py(0), py(1)]) { ctx.beginPath(); ctx.arc(cx, cy, 8, 0, Math.PI * 2); ctx.stroke(); }
       for (const side of [0, 1]) {
         const gx = side === 0 ? px(0) : px(1);
         const dir = side === 0 ? 1 : -1;
-        ctx.strokeRect(Math.min(gx, gx + dir * 78), py(0.24), 78, py(0.76) - py(0.24));
-        ctx.strokeRect(Math.min(gx, gx + dir * 30), py(0.38), 30, py(0.62) - py(0.38));
-        ctx.beginPath(); ctx.arc(gx + dir * 55, py(0.5), 3, 0, Math.PI * 2); ctx.fillStyle = "rgba(255,255,255,0.75)"; ctx.fill();
-        ctx.fillStyle = "rgba(255,255,255,0.9)";
-        ctx.fillRect(side === 0 ? gx - 7 : gx, py(0.44), 7, py(0.56) - py(0.44));
+        ctx.strokeRect(Math.min(gx, gx + dir * 82), py(0.22), 82, py(0.78) - py(0.22));
+        ctx.strokeRect(Math.min(gx, gx + dir * 32), py(0.38), 32, py(0.62) - py(0.38));
+        const spotX = gx + dir * 56;
+        ctx.beginPath(); ctx.arc(spotX, py(0.5), 3, 0, Math.PI * 2); ctx.fillStyle = "rgba(255,255,255,0.8)"; ctx.fill();
+        ctx.beginPath(); ctx.arc(spotX, py(0.5), 30, side === 0 ? -0.9 : Math.PI - 0.9, side === 0 ? 0.9 : Math.PI + 0.9); ctx.stroke();
+        const goalTop = py(0.43), goalBot = py(0.57), netD = dir * 9;
+        ctx.fillStyle = "rgba(255,255,255,0.14)"; ctx.fillRect(Math.min(gx, gx + netD), goalTop, 9, goalBot - goalTop);
+        ctx.strokeStyle = "rgba(255,255,255,0.4)"; ctx.lineWidth = 0.6;
+        for (let n = 0; n <= 4; n++) { const yy = goalTop + ((goalBot - goalTop) * n) / 4; ctx.beginPath(); ctx.moveTo(gx, yy); ctx.lineTo(gx + netD, yy); ctx.stroke(); }
+        for (let n = 0; n <= 3; n++) { const xx = gx + (netD * n) / 3; ctx.beginPath(); ctx.moveTo(xx, goalTop); ctx.lineTo(xx, goalBot); ctx.stroke(); }
+        ctx.strokeStyle = "rgba(255,255,255,0.95)"; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(gx, goalTop); ctx.lineTo(gx, goalBot); ctx.stroke(); ctx.lineWidth = 2;
       }
     };
 
-    const drawDot = (x, y, color, num, isGK, lying = false, ring = false) => {
-      const X = px(x), Y = py(y);
+    const drawDot = (a, color) => {
+      const X = px(a.pos[0]), Y = py(a.pos[1]);
+      const spd = Math.hypot(a.vel[0], a.vel[1]);
+      const ang = spd > 0.004 ? Math.atan2(a.vel[1], a.vel[0]) : 0;
+      const isCarrier = st.ball.carrier && st.ball.carrier.side === a._side && st.ball.carrier.idx === a._i;
       ctx.save();
-      if (lying) { ctx.translate(X, Y); ctx.rotate(Math.PI / 2); ctx.translate(-X, -Y); }
-      if (ring) {
-        ctx.beginPath();
-        ctx.arc(X, Y, 12.5, 0, Math.PI * 2);
-        ctx.strokeStyle = "#facc15";
-        ctx.lineWidth = 2.5;
-        ctx.stroke();
-      }
-      ctx.beginPath();
-      ctx.arc(X, Y + 6, 5, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(0,0,0,0.25)";
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(X, Y, 8.5, 0, Math.PI * 2);
-      ctx.fillStyle = isGK ? "#f59e0b" : color;
-      ctx.fill();
-      ctx.lineWidth = 1.5;
-      ctx.strokeStyle = "rgba(255,255,255,0.85)";
-      ctx.stroke();
-      ctx.fillStyle = isGK || color === "#f8fafc" ? "#0f172a" : "#fff";
-      ctx.font = "bold 8px sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(String(num), X, Y + 0.5);
+      ctx.translate(X, Y);
+      if (a.down || a.dive) ctx.rotate(Math.PI / 2); // caído / guarda-redes em voo
+      ctx.beginPath(); ctx.ellipse(0, 7, 6, 2.4, 0, 0, Math.PI * 2); ctx.fillStyle = "rgba(0,0,0,0.28)"; ctx.fill();
+      if (isCarrier) { ctx.beginPath(); ctx.arc(0, 0, 12.5, 0, Math.PI * 2); ctx.strokeStyle = "#facc15"; ctx.lineWidth = 2.5; ctx.stroke(); }
+      const stretch = clamp(spd * 3.5, 0, 0.5);
+      ctx.save(); ctx.rotate(ang);
+      ctx.beginPath(); ctx.ellipse(0, 0, 8.5 * (1 + stretch * 0.5), 8.5 * (1 - stretch * 0.35), 0, 0, Math.PI * 2);
+      ctx.fillStyle = a.gk ? "#f59e0b" : color; ctx.fill();
+      ctx.lineWidth = 1.5; ctx.strokeStyle = "rgba(255,255,255,0.9)"; ctx.stroke();
+      ctx.restore();
+      ctx.fillStyle = a.gk || color === "#f8fafc" ? "#0f172a" : "#fff";
+      ctx.font = "bold 8px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(String(a.num), 0, 0.5);
       ctx.restore();
     };
 
-    const draw = (now) => {
-      const sc = scenes[S.idx];
-      if (S.planIdx !== S.idx) buildPlan(sc);
-      const time = now / 1000;
-      drawPitch();
+    const draw = () => {
+      const b = st.ball;
+      const goalMoment = st.banner?.kind === "goal";
+      const zTarget = goalMoment ? 1.26 : st.banner?.kind === "save" || st.banner?.kind === "miss" ? 1.18 : st.done ? 1.0 : 1.1;
+      const cr = clamp(S.dt * 2.4, 0.01, 0.16);
+      S.cam.x += (lerp(0.5, b.pos[0], 0.74) - S.cam.x) * cr;
+      S.cam.y += (lerp(0.5, b.pos[1], 0.66) - S.cam.y) * cr;
+      S.cam.z += (zTarget - S.cam.z) * clamp(S.dt * 1.8, 0.01, 0.12);
 
-      const k = sc ? clamp(S.t / sc.dur, 0, 1) : 1;
+      ctx.fillStyle = "#0a1a10"; ctx.fillRect(0, 0, W, Hh);
+      ctx.save(); applyCam(); drawPitch();
 
-      /* ---- bola: circulação nó-a-nó nas cenas de posse; caminho do lance nas outras ---- */
-      let bx = 0.5, by = 0.5, bz = 0, holderSlot = null, holderSide = null, passing = null;
-      if (sc?.kind === "flow" && S.plan?.nodes) {
-        const fb = flowBall(S.plan.nodes, k);
-        bx = fb.x; by = fb.y; bz = fb.z;
-        if (fb.holder !== null) { holderSlot = fb.holder; holderSide = sc.side; }
-        if (fb.from && fb.travelK < 0.35) passing = fb.from; // flash do passe
-      } else if (sc?.ball) {
-        [bx, by, bz] = pathPosZ(sc.ball, k);
-      }
-
-      // rasto (visível quando a bola voa depressa — passes longos e remates)
-      S.trail.push([bx, by]);
-      if (S.trail.length > 7) S.trail.shift();
-
-      /* ---- jogadores ---- */
-      const wander = (i, side) => [
-        Math.sin(time * 0.9 + i * 2.1 + side * 3 + S.wanderSeed) * 0.012,
-        Math.cos(time * 0.7 + i * 1.7 + side * 5 + S.wanderSeed) * 0.015,
-      ];
-      const eventScene = sc && sc.kind !== "flow" && sc.kind !== "kickoff" && sc.kind !== "halftime" && sc.kind !== "fulltime";
-
-      for (const [xi, spots, sideKey, kit] of [
-        [result.homeXI, spotsH, "H", kitH],
-        [result.awayXI, spotsA, "A", kitA],
-      ]) {
-        xi.forEach((p, i) => {
-          if (S.removed.has(p.id)) return;
-          const isGK = lineOf(p.pos) === "GR";
-          const [bxp, byp] = spots[i];
-          const [wx, wy] = wander(i, sideKey === "H" ? 0 : 1);
-          let x = bxp + (bx - 0.5) * (isGK ? 0.02 : 0.22) + wx;
-          let y = byp + (by - 0.5) * (isGK ? 0.35 : 0.3) + wy;
-          let lying = false;
-          let ring = false;
-
-          // circulação: os participantes do plano ficam nos seus nós (recebem o passe)
-          if (sc?.kind === "flow" && S.plan?.nodes && sideKey === sc.side) {
-            const node = S.plan.nodes.find((n) => n.slot === i);
-            if (node) { x = node.x + wx * 0.4; y = node.y + wy * 0.4; }
-            if (holderSide === sideKey && holderSlot === i) ring = true;
-          }
-
-          if (eventScene) {
-            // atacantes ancorados aos pontos do lance (a jogada tem passes visíveis)
-            if (sideKey === sc.side && S.plan?.anchors?.length) {
-              const a = S.plan.anchors.find((a) => a.slot === i);
-              if (a) {
-                const reach = clamp(k / Math.max(0.05, a.t), 0, 1);
-                x = lerp(bxp + wx, a.x, ease(reach));
-                y = lerp(byp + wy, a.y, ease(reach));
-                if (Math.hypot(bx - x, by - y) < 0.035) ring = true;
-              }
-            }
-            if (p.id === sc.scorerPid || (sc.kind !== "goal" && p.id === sc.pid && sc.kind !== "injury")) {
-              x = lerp(x, bx - (sideKey === "H" ? 0.02 : -0.02), 0.85); y = lerp(y, by, 0.85);
-              if (Math.hypot(bx - x, by - y) < 0.045) ring = true;
-            }
-            if (p.id === sc.assistPid) { x = lerp(x, bx, 0.5); y = lerp(y, by + 0.08, 0.5); }
-            if (sc.kind === "injury" && p.id === sc.pid) { x = sc.spot[0]; y = sc.spot[1]; lying = true; }
-            if ((sc.kind === "red" || sc.kind === "yellow" || sc.kind === "foul") && p.id === sc.pid) { x = sc.spot[0]; y = sc.spot[1]; }
-            if (isGK) {
-              const defendsLeft = sideKey === "H";
-              const ballNear = defendsLeft ? bx < 0.35 : bx > 0.65;
-              if (ballNear) y = clamp(by, 0.4, 0.6);
-            }
-          }
-          drawDot(clamp(x, 0.005, 0.995), clamp(y, 0.01, 0.99), kit, i + 1, isGK, lying, ring);
-        });
-      }
-
-      // árbitro
-      drawDot(clamp(bx - 0.06, 0.02, 0.98), clamp(by + 0.1, 0.05, 0.95), "#1e293b", "", false);
-
-      /* ---- flash do passe + rasto ---- */
-      if (passing) {
-        ctx.beginPath();
-        ctx.moveTo(px(passing.x), py(passing.y));
-        ctx.lineTo(px(bx), py(by));
-        ctx.strokeStyle = "rgba(255,255,255,0.5)";
-        ctx.lineWidth = 2;
-        ctx.setLineDash([4, 5]);
-        ctx.stroke();
-        ctx.setLineDash([]);
-      }
+      // rasto da bola
+      S.trail.push([b.pos[0], b.pos[1]]); if (S.trail.length > 8) S.trail.shift();
       for (let i = 1; i < S.trail.length; i++) {
         const [x0, y0] = S.trail[i - 1], [x1, y1] = S.trail[i];
-        if (Math.hypot(x1 - x0, y1 - y0) < 0.006) continue; // só quando voa depressa
-        ctx.beginPath();
-        ctx.moveTo(px(x0), py(y0));
-        ctx.lineTo(px(x1), py(y1));
-        ctx.strokeStyle = `rgba(255,255,255,${0.08 + (i / S.trail.length) * 0.3})`;
-        ctx.lineWidth = 2.5;
-        ctx.stroke();
+        if (Math.hypot(x1 - x0, y1 - y0) < 0.004) continue;
+        ctx.beginPath(); ctx.moveTo(px(x0), py(y0)); ctx.lineTo(px(x1), py(y1));
+        ctx.strokeStyle = `rgba(255,255,255,${0.05 + (i / S.trail.length) * 0.3})`;
+        ctx.lineWidth = 2 + (i / S.trail.length) * 1.5; ctx.stroke();
       }
 
-      /* ---- bola ---- */
-      if (sc && sc.kind !== "halftime" && sc.kind !== "fulltime") {
-        const BX = px(bx), BY = py(by);
-        ctx.beginPath(); ctx.ellipse(BX, BY + 5, 4.5, 2, 0, 0, Math.PI * 2); ctx.fillStyle = "rgba(0,0,0,0.3)"; ctx.fill();
-        ctx.beginPath(); ctx.arc(BX, BY - bz * 220, 4.5, 0, Math.PI * 2);
-        ctx.fillStyle = "#fff"; ctx.fill();
+      st.A.forEach((a, i) => { if (a.off) return; a._side = "A"; a._i = i; drawDot(a, kitA); });
+      st.H.forEach((a, i) => { if (a.off) return; a._side = "H"; a._i = i; drawDot(a, kitH); });
+
+      // árbitro
+      const rx = clamp(b.pos[0] - 0.07, 0.02, 0.98), ry = clamp(b.pos[1] + 0.11, 0.05, 0.95);
+      ctx.save(); ctx.translate(px(rx), py(ry));
+      ctx.beginPath(); ctx.arc(0, 0, 6.5, 0, Math.PI * 2); ctx.fillStyle = "#1e293b"; ctx.fill();
+      ctx.lineWidth = 1; ctx.strokeStyle = "rgba(255,255,255,0.6)"; ctx.stroke(); ctx.restore();
+
+      // bola
+      if (!st.done || goalMoment) {
+        const BX = px(b.pos[0]), BY = py(b.pos[1]);
+        ctx.beginPath(); ctx.ellipse(BX, BY + 5, 4.5 + b.z * 40, 2 + b.z * 12, 0, 0, Math.PI * 2); ctx.fillStyle = "rgba(0,0,0,0.3)"; ctx.fill();
+        ctx.beginPath(); ctx.arc(BX, BY - b.z * 220, 4.6, 0, Math.PI * 2); ctx.fillStyle = "#fff"; ctx.fill();
         ctx.strokeStyle = "#334155"; ctx.lineWidth = 1; ctx.stroke();
       }
+      ctx.restore(); // câmara
 
-      // confettis
+      // confettis (ecrã)
       for (const pt of S.particles) {
-        ctx.fillStyle = pt.color;
-        ctx.fillRect(px(pt.x), py(pt.y), 4, 4);
+        ctx.save(); ctx.translate(pt.x * W, pt.y * Hh); ctx.rotate(pt.rot);
+        ctx.fillStyle = pt.color; ctx.fillRect(-2.5, -2.5, 5, 5); ctx.restore();
       }
+      if (st.flash > 0.01) { ctx.fillStyle = `rgba(255,255,255,${st.flash * 0.45})`; ctx.fillRect(0, 0, W, Hh); }
 
-      /* ---- overlays ---- */
-      if (sc) {
-        if (sc.kind === "goal" && k > 0.7) {
-          ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.fillRect(0, Hh / 2 - 44, W, 88);
-          ctx.fillStyle = "#facc15"; ctx.font = "bold 44px sans-serif"; ctx.textAlign = "center";
-          ctx.fillText("GOOOLO!", W / 2, Hh / 2 + 14);
-        }
-        if ((sc.kind === "save" || sc.kind === "miss") && k > 0.8) {
-          ctx.fillStyle = "rgba(255,255,255,0.9)"; ctx.font = "bold 20px sans-serif"; ctx.textAlign = "center";
-          ctx.fillText(sc.kind === "save" ? "DEFESA!" : "AO LADO!", px(sc.side === "H" ? 0.85 : 0.15), py(0.12));
-        }
-        if ((sc.kind === "yellow" || sc.kind === "red") && k > 0.35) {
-          const X = px(sc.spot[0]), Y = py(sc.spot[1]) - 26;
-          ctx.save();
-          ctx.translate(X, Y); ctx.rotate(-0.12);
-          ctx.fillStyle = sc.kind === "red" ? "#dc2626" : "#facc15";
-          ctx.fillRect(-7, -11, 14, 22);
-          ctx.strokeStyle = "rgba(0,0,0,0.4)"; ctx.strokeRect(-7, -11, 14, 22);
-          ctx.restore();
-        }
-        if (sc.kind === "kickoff" || sc.kind === "halftime" || sc.kind === "fulltime") {
-          ctx.fillStyle = "rgba(2,6,23,0.55)"; ctx.fillRect(0, 0, W, Hh);
-          ctx.fillStyle = "#f8fafc"; ctx.font = "bold 30px sans-serif"; ctx.textAlign = "center";
-          ctx.fillText(sc.kind === "kickoff" ? "APITO INICIAL" : sc.kind === "halftime" ? "INTERVALO" : "FINAL DO JOGO", W / 2, Hh / 2);
+      const vg = ctx.createRadialGradient(W / 2, Hh / 2, Hh * 0.3, W / 2, Hh / 2, Hh * 0.82);
+      vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,0.28)");
+      ctx.fillStyle = vg; ctx.fillRect(0, 0, W, Hh);
+
+      // banners
+      const bn = st.banner;
+      if (bn && !st.done) {
+        if (bn.kind === "goal") {
+          ctx.fillStyle = "rgba(0,0,0,0.32)"; ctx.fillRect(0, Hh / 2 - 46, W, 92);
+          ctx.fillStyle = "#facc15"; ctx.font = "900 48px sans-serif"; ctx.textAlign = "center";
+          ctx.fillText("GOOOLO!", W / 2, Hh / 2 + 15);
+        } else if (bn.kind === "save" || bn.kind === "miss") {
+          ctx.fillStyle = "rgba(255,255,255,0.92)"; ctx.font = "bold 22px sans-serif"; ctx.textAlign = "center";
+          ctx.fillText(bn.text, W / 2, 40);
+        } else if (bn.kind === "red" || bn.kind === "yellow") {
+          ctx.save(); ctx.translate(W / 2, 44); ctx.rotate(-0.1);
+          ctx.fillStyle = bn.kind === "red" ? "#dc2626" : "#facc15"; ctx.fillRect(-9, -14, 18, 28);
+          ctx.strokeStyle = "rgba(0,0,0,0.4)"; ctx.strokeRect(-9, -14, 18, 28); ctx.restore();
         }
       }
-      if (S.done) {
-        ctx.fillStyle = "rgba(2,6,23,0.6)"; ctx.fillRect(0, 0, W, Hh);
-        ctx.fillStyle = "#f8fafc"; ctx.font = "bold 34px sans-serif"; ctx.textAlign = "center";
-        ctx.fillText(`${result.score[0]} - ${result.score[1]}`, W / 2, Hh / 2 - 10);
+      if (st.done) {
+        ctx.fillStyle = "rgba(2,6,23,0.62)"; ctx.fillRect(0, 0, W, Hh);
+        ctx.fillStyle = "#f8fafc"; ctx.font = "900 36px sans-serif"; ctx.textAlign = "center";
+        ctx.fillText(`${result.score[0]} - ${result.score[1]}`, W / 2, Hh / 2 - 8);
         ctx.font = "600 16px sans-serif"; ctx.fillStyle = "#94a3b8";
-        ctx.fillText("Final do jogo", W / 2, Hh / 2 + 20);
+        ctx.fillText(result.penalties ? `Final · penáltis ${result.penalties[0]}-${result.penalties[1]}` : "Final do jogo", W / 2, Hh / 2 + 22);
       }
     };
 
     let raf;
-    const step = (now) => {
+    const stepLoop = (now) => {
       const dt = S.lastNow ? Math.min(0.1, (now - S.lastNow) / 1000) : 0;
-      S.lastNow = now;
+      S.lastNow = now; S.dt = dt;
 
-      if (!S.done && S.playing) {
-        S.t += dt * S.speed;
-        let guard = 0;
-        while (S.idx < scenes.length && S.t >= scenes[S.idx].dur && guard++ < 50) {
-          S.t -= scenes[S.idx].dur;
-          completeScene(scenes[S.idx]);
-          S.idx++;
+      if (!st.done && S.playing) {
+        const nf = sim.step(dt * S.speed);
+        playSfx(now);
+        if (nf.length) setFeed((f) => [...nf.map((x) => ({ min: x.min, text: x.text, type: x.type })).reverse(), ...f]);
+        setScore([...st.score]);
+        setMinute(Math.round(st.minute));
+        if (st.goalCount > S.lastGoal) {
+          S.lastGoal = st.goalCount;
+          const color = kitH; // cor genérica de festa
+          for (let i = 0; i < 90; i++) S.particles.push({ x: Math.random(), y: -0.05 - Math.random() * 0.4, vy: 0.18 + Math.random() * 0.3, vx: (Math.random() - 0.5) * 0.12, rot: Math.random() * 6.28, vr: (Math.random() - 0.5) * 8, color: Math.random() < 0.5 ? color : (Math.random() < 0.5 ? "#facc15" : "#f8fafc"), life: 3 });
         }
-        if (S.idx >= scenes.length) { S.done = true; setDone(true); setMinute(90); }
-        else {
-          const sc = scenes[S.idx];
-          const k = clamp(S.t / sc.dur, 0, 1);
-          setMinute(Math.round(lerp(sc.minStart ?? sc.min ?? 0, sc.minEnd ?? sc.min ?? 0, k)));
-        }
-        for (const p of S.particles) { p.y += p.vy * dt; p.x += p.vx * dt; p.life -= dt; }
-        S.particles = S.particles.filter((p) => p.life > 0 && p.y < 1.1);
+        if (st.done && !S.finished) { S.finished = true; setDone(true); setScore([...result.score]); setMinute(90); }
       }
-      draw(now);
-      raf = requestAnimationFrame(step);
+      for (const p of S.particles) { p.y += p.vy * dt; p.x += p.vx * dt; p.rot += p.vr * dt; p.life -= dt; }
+      S.particles = S.particles.filter((p) => p.life > 0 && p.y < 1.15);
+
+      draw();
+      raf = requestAnimationFrame(stepLoop);
     };
-    raf = requestAnimationFrame(step);
+    raf = requestAnimationFrame(stepLoop);
     return () => cancelAnimationFrame(raf);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const skip = () => {
+    const nf = S.sim.skip() ?? [];
+    if (nf.length) setFeed((f) => [...nf.map((x) => ({ min: x.min, text: x.text, type: x.type })).reverse(), ...f]);
+    setScore([...result.score]); setMinute(90); setDone(true); S.finished = true;
+  };
+
   return (
     <div className="flex flex-col gap-2">
-      {/* marcador */}
       <div className="flex items-center justify-between rounded-lg border border-[#d9dcc8] bg-white px-3 py-2 shadow-sm">
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <Emblem emblem={homeInfo.emblem} size={30} />
@@ -447,7 +307,6 @@ export default function MatchViewer2D({ live, club, onFinish }) {
 
       <canvas ref={canvasRef} className="w-full rounded-lg border border-[#3e7a1c] shadow" style={{ aspectRatio: "720/460" }} />
 
-      {/* controlos — fixos acima do feed que cresce */}
       <div className="flex items-center gap-2">
         {!done && (
           <>
@@ -455,15 +314,14 @@ export default function MatchViewer2D({ live, club, onFinish }) {
               {playing ? "⏸" : "▶"}
             </button>
             {[1, 2, 4].map((s) => (
-              <button
-                key={s}
-                onClick={() => setSpeed(s)}
-                className={`rounded-md px-3 py-1.5 text-sm font-bold ${speed === s ? "btn-green" : "border border-[#c9cdb6] bg-white hover:bg-[#f4f5ec]"}`}
-              >
+              <button key={s} onClick={() => setSpeed(s)} className={`rounded-md px-3 py-1.5 text-sm font-bold ${speed === s ? "btn-green" : "border border-[#c9cdb6] bg-white hover:bg-[#f4f5ec]"}`}>
                 {s}x
               </button>
             ))}
-            <button onClick={() => S.finishAll?.()} className="ml-auto rounded-md border border-[#c9cdb6] bg-white px-3 py-1.5 text-sm font-bold hover:bg-[#f4f5ec]">
+            <button onClick={() => setMuted((m) => !m)} title={muted ? "Ligar som" : "Desligar som"} className="ml-auto rounded-md border border-[#c9cdb6] bg-white px-3 py-1.5 text-sm font-bold hover:bg-[#f4f5ec]">
+              {muted ? "🔇" : "🔊"}
+            </button>
+            <button onClick={skip} className="rounded-md border border-[#c9cdb6] bg-white px-3 py-1.5 text-sm font-bold hover:bg-[#f4f5ec]">
               Saltar ⏭
             </button>
           </>
@@ -475,7 +333,6 @@ export default function MatchViewer2D({ live, club, onFinish }) {
         )}
       </div>
 
-      {/* relato */}
       <div className="max-h-40 overflow-y-auto rounded-lg border border-[#d9dcc8] bg-white p-2 shadow-sm">
         {feed.length === 0 && <p className="p-1 text-xs text-[#9aa08e]">O relato aparece aqui…</p>}
         {feed.map((f, i) => (

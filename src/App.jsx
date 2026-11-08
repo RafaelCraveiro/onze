@@ -171,7 +171,7 @@ export default function App() {
               {tab === "plantel" && <SquadView game={game} actions={actions} onShowPlayer={(id) => setPlayerPage({ playerId: id })} />}
               {tab === "taticas" && <TacticsView game={game} actions={actions} />}
               {tab === "treino" && <TrainingView game={game} actions={actions} />}
-              {tab === "mercado" && <MarketView game={game} actions={actions} onShowPlayer={(player) => setPlayerPage({ player, owner: null })} />}
+              {tab === "mercado" && <MarketView game={game} actions={actions} onShowProfile={setProfileOf} onShowPlayer={(player, owner = null) => setPlayerPage({ player, owner })} />}
               {tab === "competicoes" && <CompetitionsView game={game} actions={actions} now={now} onPrepareMatch={prepareMatch} onShowProfile={setProfileOf} />}
               {tab === "clube" && <ClubView game={game} actions={actions} />}
             </>

@@ -160,6 +160,15 @@ app.post("/api/market/sell", auth, (req, res) => {
 app.post("/api/market/cancel", auth, (req, res) => {
   reply(res, club.cancelSale(req.userId, String(req.body?.playerId ?? ""), Date.now()));
 });
+
+/* ---------- mercado de transferências entre managers reais ---------- */
+app.get("/api/transfers", auth, (req, res) => {
+  const pos = req.query?.pos ? String(req.query.pos) : null;
+  res.json({ transfers: club.listTransfers(req.userId, { pos }) });
+});
+app.post("/api/transfers/buy", auth, (req, res) => {
+  reply(res, club.buyTransfer(req.userId, String(req.body?.listingId ?? ""), Date.now()));
+});
 app.post("/api/squad/release", auth, (req, res) => {
   reply(res, club.releasePlayer(req.userId, String(req.body?.playerId ?? ""), Date.now()));
 });

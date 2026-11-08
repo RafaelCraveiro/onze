@@ -46,6 +46,10 @@ export const apiTrain = (playerId, skill) => call("POST", `/api/squad/${playerId
 export const apiBuy = (listingId) => call("POST", "/api/market/buy", { listingId });
 export const apiSell = (playerId, price) => call("POST", "/api/market/sell", { playerId, price });
 export const apiCancelSale = (playerId) => call("POST", "/api/market/cancel", { playerId });
+
+// mercado de transferências entre managers reais
+export const apiTransfers = (pos) => call("GET", `/api/transfers${pos ? `?pos=${encodeURIComponent(pos)}` : ""}`);
+export const apiBuyTransfer = (listingId) => call("POST", "/api/transfers/buy", { listingId });
 export const apiRelease = (playerId) => call("POST", "/api/squad/release", { playerId });
 export const apiUpgrade = (key) => call("POST", "/api/club/upgrade", { key });
 export const apiBooster = (key) => call("POST", "/api/club/booster", { key });
@@ -71,5 +75,9 @@ export const API_ERROR_PT = {
   "teto-atingido": "Este atributo já está no teto (25).",
   "xp-insuficiente": "Não tens XP suficiente para este jogador.",
   "perfil-inexistente": "Esse manager não existe (ou é um bot).",
+  "listagem-inexistente": "Essa listagem já não está disponível.",
+  "listagem-indisponivel": "O vendedor já não pode vender este jogador (plantel no mínimo).",
+  "plantel-cheio": "O teu plantel está cheio.",
+  "erro-transferencia": "Falha na transferência — tenta outra vez.",
 };
 export const errPt = (e) => API_ERROR_PT[e?.message] ?? `Erro inesperado (${e?.message ?? "?"}).`;

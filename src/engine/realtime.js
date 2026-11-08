@@ -13,7 +13,7 @@ import {
 } from "./constants.js";
 import { YOU } from "./competitions.js";
 import { genYouth } from "./generation.js";
-import { refreshMarket, processSales } from "./market.js";
+import { refreshMarket } from "./market.js";
 import { pushNews } from "./progress.js";
 
 export const fmtTime = (ts) => {
@@ -76,22 +76,15 @@ const processUpkeep = (game, now, rng) => {
     changed = true;
   }
 
-  // tick horário: vendas, moral (com teto para regressos de offline)
+  // tick horário: moral (com teto para regressos de offline).
+  // Vender jogadores é agora 100% entre managers reais (server/club.mjs:
+  // listTransfers/buyTransfer) — já não há comprador simulado a "comer" as
+  // listagens, por isso um jogador só sai quando outro treinador o compra.
   let hourTicks = 0;
   let lastHourly = game.lastHourly ?? now;
   while (now - lastHourly >= HOUR_MS && hourTicks < 48) { hourTicks++; lastHourly += HOUR_MS; }
   if (now - lastHourly >= HOUR_MS) lastHourly = now; // offline muito longo: perdoa o resto
   if (hourTicks > 0) {
-    for (let t = 0; t < Math.min(hourTicks, 24); t++) {
-      const { sold, kept } = processSales(game.players, rng, 0.4);
-      if (sold.length) {
-        game.players = kept;
-        for (const p of sold) {
-          game.club.money += p.selling;
-          pushNews(game, "transfer", "Jogador vendido", `${p.name} foi vendido por ${p.selling}€.`);
-        }
-      }
-    }
     game.club.morale = Math.round(Math.max(5, Math.min(100, game.club.morale + (game.club.morale < 65 ? 1.5 : -1) * Math.min(hourTicks, 6))) * 10) / 10;
     for (const p of game.players) p.morale = Math.min(100, (p.morale ?? 0) + hourTicks);
     changed = true;

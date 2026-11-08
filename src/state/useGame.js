@@ -12,6 +12,7 @@ import {
   getToken, setToken, apiRegister, apiLogin, apiLogout, apiState,
   apiSetLineup, apiSetStyle, apiTrain,
   apiBuy, apiSell, apiCancelSale, apiRelease, apiUpgrade, apiBooster, apiFriendly,
+  apiTransfers, apiBuyTransfer,
   errPt,
 } from "./api.js";
 import { fetchCups, enrollCupApi, registerTeamApi, cupErrPt } from "./cupsRemote.js";
@@ -32,7 +33,7 @@ export const useGame = () => {
     (async () => {
       try {
         const { game: g } = await apiState();
-        setGame({ ...g, cups: [], live: null });
+        setGame({ ...g, cups: [], transfers: [], live: null });
         setAuth({ status: "authed", error: null, busy: false });
       } catch (e) {
         if (e.message === "sem-sessao" || e.message === "sessao-invalida") {
@@ -49,13 +50,19 @@ export const useGame = () => {
   const refreshState = async () => {
     try {
       const { game: fresh } = await apiState();
-      setGame((g) => (g ? { ...g, ...fresh, cups: g.cups, live: g.live } : g));
+      setGame((g) => (g ? { ...g, ...fresh, cups: g.cups, transfers: g.transfers, live: g.live } : g));
     } catch { /* silencioso — o próximo poll tenta de novo */ }
   };
   const refreshCups = async () => {
     try {
       const cups = await fetchCups();
       setGame((g) => (g ? { ...g, cups } : g));
+    } catch { /* silencioso */ }
+  };
+  const refreshTransfers = async (pos) => {
+    try {
+      const { transfers } = await apiTransfers(pos);
+      setGame((g) => (g ? { ...g, transfers } : g));
     } catch { /* silencioso */ }
   };
 
@@ -97,7 +104,7 @@ export const useGame = () => {
       try {
         const { token, game: g } = await apiRegister(email, password, clubName, emblem);
         setToken(token);
-        setGame({ ...g, cups: [], live: null });
+        setGame({ ...g, cups: [], transfers: [], live: null });
         setAuth({ status: "authed", error: null, busy: false });
         return true;
       } catch (e) {
@@ -110,7 +117,7 @@ export const useGame = () => {
       try {
         const { token, game: g } = await apiLogin(email, password);
         setToken(token);
-        setGame({ ...g, cups: [], live: null });
+        setGame({ ...g, cups: [], transfers: [], live: null });
         setAuth({ status: "authed", error: null, busy: false });
         return true;
       } catch (e) {
@@ -194,9 +201,22 @@ export const useGame = () => {
 
     /* ---------- Mercado ---------- */
     buyPlayer: (listingId) => runEconomic(() => apiBuy(listingId)),
-    listForSale: (playerId, price) => runEconomic(() => apiSell(playerId, price)),
-    cancelSale: (playerId) => runEconomic(() => apiCancelSale(playerId)),
-    releasePlayer: (playerId) => runEconomic(() => apiRelease(playerId)),
+    listForSale: (playerId, price) => runEconomic(async () => { await apiSell(playerId, price); await refreshTransfers(); }),
+    cancelSale: (playerId) => runEconomic(async () => { await apiCancelSale(playerId); await refreshTransfers(); }),
+    releasePlayer: (playerId) => runEconomic(async () => { await apiRelease(playerId); await refreshTransfers(); }),
+
+    /* ---------- Mercado de transferências (managers reais) ---------- */
+    refreshTransfers,
+    buyTransferPlayer: async (listingId) => {
+      try {
+        const out = await apiBuyTransfer(listingId);
+        flash(`Contratação feita ✓ — ${out.player} por ${out.price}€.`, "ok");
+        await Promise.all([refreshState(), refreshTransfers()]);
+      } catch (e) {
+        flash(errPt(e), "erro");
+        refreshTransfers();
+      }
+    },
 
     /* ---------- Taças (servidor) ---------- */
     enrollCup: async (cupId) => {

@@ -11,9 +11,9 @@
    visita pós-upgrade. */
 
 import {
-  STARTING_MONEY, SQUAD_MIN, BUILDINGS, buildingCost, BOOSTERS,
+  STARTING_MONEY, SQUAD_MIN, SQUAD_CAP, BUILDINGS, buildingCost, BOOSTERS,
   TRAIN_BOOST_MS, MARKET_UNLOCK_LEVEL, FORMATIONS, STYLES,
-  SKILLS, SKILL_CAP, trainCost,
+  SKILLS, SKILL_CAP, trainCost, totalSkill, playerValue,
 } from "../src/engine/constants.js";
 import { genInitialSquad } from "../src/engine/generation.js";
 import { autoPickXI, prepareUserTeam } from "../src/engine/team.js";
@@ -267,7 +267,9 @@ export const buyListing = (userId, listingId, now = Date.now()) => {
   return { ok: true };
 };
 
-/* Vender no mercado a sério: só a partir do nível MARKET_UNLOCK_LEVEL. */
+/* Pôr à venda no mercado de transferências: só a partir de MARKET_UNLOCK_LEVEL.
+   O jogador fica no plantel (ainda jogável) mas visível para todos os outros
+   managers em listTransfers — sai só quando alguém o comprar (buyTransfer). */
 export const sellPlayer = (userId, playerId, price, now = Date.now()) => {
   const game = tickClub(userId, now);
   if (game.club.level < MARKET_UNLOCK_LEVEL) return { error: "mercado-bloqueado" };
@@ -275,7 +277,9 @@ export const sellPlayer = (userId, playerId, price, now = Date.now()) => {
   if (block) return { error: "nao-permitido", detail: block };
   const p = game.players.find((p) => p.id === playerId);
   if (!p) return { error: "jogador-inexistente" };
-  p.selling = Math.max(50, Math.round(price));
+  // teto generoso (evita "lavar" dinheiro entre contas com preços absurdos)
+  const cap = Math.max(20000, playerValue(p) * 30);
+  p.selling = Math.max(50, Math.min(cap, Math.round(price)));
   persistGame(userId, game);
   return { ok: true };
 };
@@ -286,6 +290,94 @@ export const cancelSale = (userId, playerId, now = Date.now()) => {
   if (p) delete p.selling;
   persistGame(userId, game);
   return { ok: true };
+};
+
+/* ---------- MERCADO DE TRANSFERÊNCIAS (global, entre managers reais) ----------
+   A fonte de verdade de uma listagem é o próprio jogador com `selling` definido.
+   Não há comprador simulado: qualquer manager pode comprar o jogador de outro,
+   e a transferência move a linha do vendedor para o comprador (o dinheiro passa
+   de um para o outro — soma zero). O id da listagem é `${sellerId}:${playerId}`
+   (os ids de jogador não contêm ":"). */
+const publicPlayer = (p) => ({
+  id: p.id, name: p.name, nat: p.nat, flag: p.flag, pos: p.pos, age: p.age,
+  talent: p.talent, skills: p.skills, fitness: Math.round(p.fitness),
+  morale: Math.round(p.morale ?? 0), stats: p.stats,
+  injuryMin: p.injuryMin ?? 0, suspension: p.suspension ?? 0,
+});
+
+export const listTransfers = (buyerId, { pos, limit = 120 } = {}) => {
+  const rows = db.prepare(`
+    SELECT p.*, u.club_name AS seller_name, u.emblem AS seller_emblem
+    FROM players p JOIN users u ON u.id = p.user_id
+    WHERE p.selling IS NOT NULL AND p.user_id != ?
+  `).all(buyerId);
+  let items = rows.map((row) => {
+    const p = rowToPlayer(row);
+    return {
+      id: `${row.user_id}:${row.id}`,
+      sellerName: row.seller_name,
+      sellerEmblem: safeJSON(row.seller_emblem, {}),
+      price: row.selling,
+      player: publicPlayer(p),
+    };
+  });
+  if (pos) items = items.filter((it) => it.player.pos === pos);
+  items.sort((a, b) => totalSkill(b.player) - totalSkill(a.player)); // melhores primeiro
+  return items.slice(0, Math.max(1, Math.min(200, limit)));
+};
+
+export const buyTransfer = (buyerId, listingId, now = Date.now()) => {
+  const sep = String(listingId).indexOf(":");
+  if (sep < 0) return { error: "listagem-inexistente" };
+  const sellerId = Number(String(listingId).slice(0, sep));
+  const playerId = String(listingId).slice(sep + 1);
+  if (!Number.isInteger(sellerId) || sellerId === buyerId) return { error: "listagem-inexistente" };
+
+  // valida a listagem contra a fonte de verdade (o jogador do vendedor, com selling)
+  const row = db.prepare("SELECT selling FROM players WHERE user_id = ? AND id = ?").get(sellerId, playerId);
+  if (!row || row.selling == null) return { error: "listagem-inexistente" };
+
+  const buyer = tickClub(buyerId, now);
+  if (buyer.players.length >= SQUAD_CAP) return { error: "plantel-cheio" };
+  if (buyer.club.money < row.selling) return { error: "dinheiro-insuficiente" };
+
+  const seller = tickClub(sellerId, now);
+  const sp = seller.players.find((x) => x.id === playerId);
+  if (!sp || sp.selling == null) return { error: "listagem-inexistente" }; // mudou durante o tick
+  if (seller.players.length <= SQUAD_MIN) {
+    // vender deixaria o vendedor abaixo do mínimo — retira a listagem em vez de vender
+    delete sp.selling;
+    persistGame(sellerId, seller);
+    return { error: "listagem-indisponivel" };
+  }
+
+  const soldPrice = sp.selling;
+  const bought = { ...sp };
+  delete bought.selling;
+
+  // sai do vendedor
+  seller.players = seller.players.filter((x) => x.id !== playerId);
+  seller.lineup.starters = (seller.lineup.starters ?? []).filter((id) => id !== playerId);
+  seller.club.money += soldPrice;
+  pushNews(seller, "transfer", "Jogador vendido", `${bought.name} foi transferido para ${buyer.club.name} por ${soldPrice}€.`);
+
+  // entra no comprador
+  buyer.players.push(bought);
+  buyer.club.money -= soldPrice;
+  pushNews(buyer, "transfer", "Contratação", `${bought.name} chegou de ${seller.club.name} por ${soldPrice}€.`);
+
+  // ORDEM CRÍTICA: `players.id` é PK global — apagar do vendedor ANTES de inserir
+  // no comprador, ou a mesma linha colidiria. Tudo numa transação (atomicidade).
+  db.exec("BEGIN");
+  try {
+    persistGame(sellerId, seller);
+    persistGame(buyerId, buyer);
+    db.exec("COMMIT");
+  } catch {
+    db.exec("ROLLBACK");
+    return { error: "erro-transferencia" };
+  }
+  return { ok: true, player: bought.name, price: soldPrice };
 };
 
 export const releasePlayer = (userId, playerId, now = Date.now()) => {

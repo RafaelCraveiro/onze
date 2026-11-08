@@ -1,9 +1,12 @@
-/* Agentes livres + vendas do utilizador.
+/* Agentes livres + regras de venda.
    AGENTES LIVRES: cada treinador tem a sua própria secção, populada desde o
    NÍVEL 1 — MARKET_DRIP_COUNT (3) jogadores aleatórios novos por dia, com
    preço de compra, mas que NÃO pertencem a nenhum treinador real. As
-   listagens expiram ao relógio. Vender jogadores (mercado a sério) continua
-   fechado até MARKET_UNLOCK_LEVEL. */
+   listagens expiram ao relógio.
+   VENDAS: pôr um jogador à venda (a partir de MARKET_UNLOCK_LEVEL) marca-o com
+   `selling` e ele passa a estar no MERCADO DE TRANSFERÊNCIAS global, comprável
+   por qualquer outro manager real (server/club.mjs: listTransfers/buyTransfer).
+   Já não há comprador simulado — o jogador só sai quando alguém o compra. */
 
 import {
   playerValue, SQUAD_CAP, SQUAD_MIN, HOUR_MS, MARKET_DRIP_COUNT, MARKET_DRIP_MS,
@@ -40,19 +43,4 @@ export const canSell = (game) => {
   const notSelling = game.players.filter((p) => !p.selling);
   if (notSelling.length <= SQUAD_MIN) return `Plantel no mínimo (${SQUAD_MIN}) — não podes vender mais.`;
   return null;
-};
-
-/* Processa vendas do utilizador (1x por hora): preço justo vende mais depressa. */
-export const processSales = (players, rng, rate = 1) => {
-  const sold = [];
-  const kept = [];
-  for (const p of players) {
-    if (!p.selling) { kept.push(p); continue; }
-    const fair = playerValue(p);
-    const ratio = p.selling / Math.max(1, fair);
-    const pSell = Math.max(0.03, Math.min(0.8, (1.35 - ratio) * 0.65)) * rate;
-    if (rng() < pSell) sold.push(p);
-    else kept.push(p);
-  }
-  return { sold, kept };
 };
