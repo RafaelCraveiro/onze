@@ -53,7 +53,7 @@ export const prepareBotTeam = (bot, day) => {
   return {
     name: bot.team, players, bench,
     slots: players.map((p) => p.pos),
-    style: ["defensivo", "equilibrado", "ofensivo"][Math.floor(rng() * 3)],
+    style: ["defensivo", "equilibrado", "ofensivo", "posse", "pressao", "contra"][Math.floor(rng() * 6)],
     morale: 70, medicoLvl: Math.min(10, 1 + Math.floor(bot.level / 2)),
     botId: bot.id,
   };

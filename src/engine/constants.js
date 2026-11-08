@@ -95,9 +95,26 @@ export const FORMATIONS = {
 };
 
 export const STYLES = {
-  defensivo: { atk: 0.88, def: 1.12, label: "Defensivo" },
-  equilibrado: { atk: 1, def: 1, label: "Equilibrado" },
-  ofensivo: { atk: 1.12, def: 0.9, label: "Ofensivo" },
+  /* ctrl: domínio da bola · volume: ocasiões criadas · expose: ocasiões que concede ·
+     counter/open: frequência de contra-ataques feitos/permitidos · direct: jogo vertical ·
+     tempo: tempo de posse · quality: qualidade dos remates · pressPow: força da pressão ·
+     fade: desgaste físico · fouls: faltas */
+  equilibrado: { label: "Equilibrado", desc: "Sem pontos fracos nem grandes vantagens.", ctrl: 1, volume: 1, expose: 1, counter: 0.05, open: 1, direct: 0.15, tempo: 1, quality: 1, pressPow: 0, fade: 1, fouls: 1 },
+  ofensivo: { label: "Ofensivo", desc: "Cria muito, mas deixa espaço nas costas. Sofre com o contra-ataque.", ctrl: 1.02, volume: 1.2, expose: 1.14, counter: 0.03, open: 1.45, direct: 0.2, tempo: 1, quality: 1, pressPow: 0, fade: 1.2, fouls: 1 },
+  defensivo: { label: "Bloco baixo", desc: "Fecha os espaços e tira velocidade ao adversário. Cria pouco.", ctrl: 0.95, volume: 0.78, expose: 0.8, counter: 0.08, open: 0.35, direct: 0.3, tempo: 0.85, quality: 1, pressPow: 0, fade: 0.8, fouls: 1.1 },
+  posse: { label: "Posse", desc: "Precisa de bons médios. Fura blocos baixos, mas a pressão incomoda.", ctrl: 1.05, volume: 0.92, expose: 0.92, counter: 0.02, open: 1, direct: 0.05, tempo: 1.25, quality: 1.12, pressPow: 0, fade: 1, fouls: 0.9 },
+  pressao: { label: "Pressão alta", desc: "Precisa de físico. Sufoca a posse, mas cansa e dá espaço atrás.", ctrl: 1, volume: 1.06, expose: 1.05, counter: 0.09, open: 1.2, direct: 0.25, tempo: 0.95, quality: 1, pressPow: 0.35, fade: 1.6, fouls: 1.35 },
+  contra: { label: "Contra-ataque", desc: "Deixa a bola ao adversário e castiga quem sobe. Sofre contra blocos baixos.", ctrl: 0.92, volume: 0.86, expose: 0.92, counter: 0.17, open: 0.8, direct: 0.5, tempo: 0.8, quality: 1.05, pressPow: 0, fade: 1, fouls: 1 },
+};
+
+/* Duelos de estilos: multiplica as ocasiões criadas por [estilo][adversário]. */
+export const MATCHUP = {
+  ofensivo: { defensivo: 1.02, posse: 1.04, pressao: 1.06 },
+  defensivo: { ofensivo: 1.08, contra: 0.98, posse: 0.88 },
+  posse: { defensivo: 1.14, contra: 1.06, pressao: 0.88, ofensivo: 0.96 },
+  pressao: { posse: 1.14, equilibrado: 1.03, defensivo: 0.9, contra: 0.92 },
+  contra: { ofensivo: 1.04, pressao: 1.02, defensivo: 0.84, posse: 0.96 },
+  equilibrado: {},
 };
 
 /* ---------- Talento e progressão ----------

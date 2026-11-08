@@ -51,6 +51,7 @@ export default function LineupEditor({ game, actions, compact = false }) {
         </span>
         <Btn kind="dark" className="!py-1 text-xs" onClick={actions.autoXI}>Auto-onze</Btn>
       </div>
+      {STYLES[game.tacticStyle] && <p className="mb-2 text-xs text-[#6f7560]"><b>{STYLES[game.tacticStyle].label}:</b> {STYLES[game.tacticStyle].desc}</p>}
 
       {/* mini-campo vertical */}
       <div

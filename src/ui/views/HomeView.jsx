@@ -143,6 +143,8 @@ const LastMatchCard = ({ lastMatch, club }) => {
         <div><b className="text-[#3a4030]">{result.onTarget[0]} - {result.onTarget[1]}</b><br />à baliza</div>
         <div><b className="text-[#3d8c0e]">{result.mvp?.name ?? "—"}</b><br />MVP</div>
       </div>
+      {result.xg && <p className="mt-1 text-center text-xs text-[#8a9077]">Qualidade das ocasiões (xG): <b className="text-[#3a4030]">{result.xg[0].toFixed(1)} - {result.xg[1].toFixed(1)}</b></p>}
+      {result.insights?.map((t) => <p key={t} className="mt-1 text-center text-xs text-[#6f7560]">{t}</p>)}
     </Section>
   );
 };

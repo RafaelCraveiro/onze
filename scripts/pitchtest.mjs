@@ -88,5 +88,53 @@ console.log("\n[3] skip() salta para o fim e devolve o relato restante");
   check("skip devolve itens de relato", Array.isArray(nf) && nf.length > 0, `(${nf?.length})`);
 }
 
+console.log("\n[4] Jogos reais do motor: variedade e fluidez");
+{
+  const { simulateMatch } = await import("../src/engine/match.js");
+  const { FORMATIONS } = await import("../src/engine/constants.js");
+  const team = (formation, style) => {
+    const slots = FORMATIONS[formation].map(([p]) => p);
+    return { name: "T", slots, style, morale: 70, bench: [], medicoLvl: 1, players: slots.map((pos, i) => ({ id: `${formation}${style}${i}`, name: `J${i}`, pos, fitness: 100, morale: 70, skills: { desarme: 10, marcacao: 10, drible: 10, controlo: 10, resistencia: 10, passe: 10, potencia: 10, precisao: 10 } })) };
+  };
+  const styles = ["equilibrado", "ofensivo", "defensivo", "posse", "pressao", "contra"];
+  const forms = Object.keys(FORMATIONS);
+  let done = 0, wrong = 0, maxJump = 0, maxPlayer = 0, kinds = {}, runs = 40, stuck = 0, shotCells = new Set(), repeats = 0, seqs = 0, nan = 0, secs = 0, offSide = 0;
+  for (let i = 0; i < runs; i++) {
+    const r = simulateMatch({ home: team(forms[i % forms.length], styles[i % 6]), away: team(forms[(i + 2) % forms.length], styles[(i + 3) % 6]) });
+    const sim = createPitchSim(r), st = sim.state;
+    let prev = [...st.ball.pos], still = 0, n = 0, prevP = st.H.concat(st.A).map((a) => [...a.pos]);
+    while (!st.done && n++ < 12000) {
+      sim.step(0.033); secs += 0.033;
+      if (!finite(st)) nan++;
+      const jump = Math.hypot(st.ball.pos[0] - prev[0], st.ball.pos[1] - prev[1]);
+      maxJump = Math.max(maxJump, jump);
+      still = jump < 1e-5 ? still + 1 : 0;
+      if (still > 400) stuck++;
+      prev = [...st.ball.pos];
+      const all = st.H.concat(st.A);
+      all.forEach((a, k) => { if (!a.off) maxPlayer = Math.max(maxPlayer, Math.hypot(a.pos[0] - prevP[k][0], a.pos[1] - prevP[k][1])); prevP[k] = [...a.pos]; });
+    }
+    if (st.done) done++;
+    if (st.score[0] !== r.score[0] || st.score[1] !== r.score[1]) wrong++;
+    for (const k of st.passLog) kinds[k] = (kinds[k] ?? 0) + 1;
+    for (let j = 3; j < st.passLog.length; j++) { seqs++; if (st.passLog[j] === st.passLog[j - 1] && st.passLog[j] === st.passLog[j - 2] && st.passLog[j] === st.passLog[j - 3]) repeats++; }
+    for (const s of st.shots) { shotCells.add(`${Math.round(s.x * 20)}:${Math.round(s.y * 10)}`); if ((s.side === "H" && s.x < 0.5) || (s.side === "A" && s.x > 0.5)) offSide++; }
+  }
+  const total = Object.values(kinds).reduce((s, v) => s + v, 0);
+  console.log("  tipos de ação:", Object.entries(kinds).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${(100 * v / total).toFixed(0)}%`).join(", "));
+  console.log(`  duração média a 1x: ${(secs / runs).toFixed(0)}s · maior salto da bola por frame: ${maxJump.toFixed(3)} · maior salto de jogador: ${maxPlayer.toFixed(3)} · zonas de remate: ${shotCells.size}`);
+  check("todos os jogos terminam", done === runs, `(${done}/${runs})`);
+  check("o placar final bate sempre certo", wrong === 0, `(${wrong})`);
+  check("sem NaN", nan === 0, `(${nan})`);
+  check("a bola nunca teletransporta", maxJump < 0.1, `(${maxJump.toFixed(3)})`);
+  check("os jogadores nunca teletransportam", maxPlayer < 0.03, `(${maxPlayer.toFixed(3)})`);
+  check("a bola não fica parada muito tempo", stuck === 0, `(${stuck})`);
+  check("pelo menos 6 tipos de ação diferentes", Object.keys(kinds).length >= 6, JSON.stringify(Object.keys(kinds)));
+  check("nenhum tipo domina (> 45%)", Math.max(...Object.values(kinds)) / total <= 0.45);
+  check("raramente 4 ações iguais seguidas (< 8%)", repeats / seqs < 0.08, `(${(100 * repeats / seqs).toFixed(1)}%)`);
+  check("remates de pelo menos 25 zonas diferentes", shotCells.size >= 25, `(${shotCells.size})`);
+  check("remates sempre no meio-campo ofensivo", offSide === 0, `(${offSide})`);
+}
+
 console.log(fails === 0 ? "\n✅ MOTOR 2D OK" : `\n❌ ${fails} falhas`);
 process.exit(fails === 0 ? 0 : 1);
