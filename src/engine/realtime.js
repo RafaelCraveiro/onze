@@ -8,7 +8,7 @@
    cliente recebe do servidor (game.cups). */
 
 import {
-  HOUR_MS, YOUTH_EVERY_MS, AGE_MS, isAgeBoundary, nextAgeBoundary, CUP_REG_WINDOW_MS, PAY_EVERY_MS, wagePerDay, SQUAD_MIN,
+  HOUR_MS, YOUTH_EVERY_MS, AGE_MS, isAgeBoundary, nextAgeBoundary, CUP_REG_WINDOW_MS, PAY_EVERY_MS, wagePerDay, sponsorPerDay, SQUAD_MIN,
   FITNESS_REGEN_PER_MIN, SQUAD_CAP, SKILLS,
 } from "./constants.js";
 import { YOU } from "./competitions.js";
@@ -113,6 +113,14 @@ const processUpkeep = (game, now, rng) => {
     changed = true;
   }
 
+  for (const p of game.players) {
+    if (p.eliteUntil && now >= p.eliteUntil) {
+      p.eliteUntil = 0;
+      pushNews(game, "squad", "Treino de Elite", `${p.name} acabou o programa e já pode jogar.`, now);
+      changed = true;
+    }
+  }
+
   // envelhecimento: calendário único do servidor. Contas novas, ou ainda com o antigo
   // relógio individual, entram na próxima data comum sem pagar anos passados.
   if (!game.nextAgingAt || !isAgeBoundary(game.nextAgingAt)) { game.nextAgingAt = nextAgeBoundary(now); changed = true; }
@@ -136,7 +144,7 @@ const processUpkeep = (game, now, rng) => {
       else p.contract = 1;
     }
     if (left.length) pushNews(game, "squad", "Fim de contrato", `Saíram a custo zero: ${left.join(", ")}.`);
-    pushNews(game, "squad", "Nova época", "Os jogadores fizeram mais um ano e os contratos encurtaram uma época.");
+    pushNews(game, "squad", "Mais um ano", "Os jogadores fizeram mais um ano e os contratos encurtaram um ano.");
     changed = true;
   }
 
@@ -146,10 +154,12 @@ const processUpkeep = (game, now, rng) => {
   while (now >= game.nextPayAt && days < 60) { days++; game.nextPayAt += PAY_EVERY_MS; }
   if (now >= game.nextPayAt) game.nextPayAt = now + PAY_EVERY_MS;
   if (days > 0) {
+    const sponsor = days * sponsorPerDay(game.club.level);
+    game.club.money += sponsor;
     const bill = days * game.players.reduce((s, p) => s + wagePerDay(p), 0);
     const paid = Math.min(Math.max(0, game.club.money), bill);
     game.club.money -= paid;
-    pushNews(game, "money", "Salários", `Pagaste ${paid}€ em salários${paid < bill ? " (o dinheiro não chegou para tudo: a moral desce)." : "."}`);
+    pushNews(game, "money", "Salários", `Recebeste ${sponsor}€ de patrocínios e pagaste ${paid}€ em salários${paid < bill ? " (o dinheiro não chegou para tudo: a moral desce)." : "."}`);
     if (paid < bill) game.club.morale = Math.max(5, game.club.morale - 8);
     changed = true;
   }

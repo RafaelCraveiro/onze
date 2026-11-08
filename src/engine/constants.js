@@ -193,7 +193,8 @@ export const REWARD_WIN_BASE = 120;
 export const REWARD_DRAW_BASE = 45;
 export const REWARD_LOSS_BASE = 15;
 export const REWARD_WIN_PER_LEVEL = 25;
-export const FRIENDLY_REWARD_MULT = 0.5;
+export const TRANSFER_TAX = 0.1;                    // comissão retirada ao vendedor entre managers
+export const sponsorPerDay = (level) => 120 + level * 30; // receita fixa diária, jogues ou não
 const POS_DEMAND = { GR: 0.85, DF: 0.95, MD: 1, AV: 1.2 };
 export const playerValue = (p) => {
   const ovr = overallBase(p);
@@ -205,6 +206,31 @@ export const playerValue = (p) => {
 export const wagePerDay = (p) => Math.max(4, Math.round(playerValue({ ...p, contract: 3 }) * 0.004));
 export const renewCost = (p) => Math.round(playerValue({ ...p, contract: 3 }) * 0.08);
 export const PAY_EVERY_MS = 24 * HOUR_MS;
+
+/* ---------- Mercado entre managers ---------- */
+export const RESALE_LOCK_MS = AGE_MS;               // um jogador comprado não pode ser revendido logo
+export const salePriceRange = (p) => { const v = playerValue({ ...p, contract: 3 }); return [Math.ceil(v * 0.5), Math.floor(v * 2)]; };
+
+/* ---------- Treino de Elite: pagar para passar o limite do jogador ---------- */
+export const ELITE_COSTS = [0.2, 0.3, 0.4, 0.6, 0.8]; // fração do valor em cada nível
+export const ELITE_MAX_AGE = 27;
+export const ELITE_MIN_TRAINING = 8;
+export const ELITE_DAYS = 5;
+export const ELITE_SLOTS = 3;
+export const POT_HARD_CAP = 99;
+export const eliteCost = (p) => Math.round(playerValue({ ...p, contract: 3 }) * (ELITE_COSTS[p.elite ?? 0] ?? Infinity));
+export const eliteBlock = (game, p) => {
+  if ((p.elite ?? 0) >= ELITE_COSTS.length) return "Já fez todos os programas possíveis.";
+  if (p.eliteUntil) return "Já está num programa.";
+  if (p.selling) return "Retira-o do mercado primeiro.";
+  if (p.age > ELITE_MAX_AGE) return `Só até aos ${ELITE_MAX_AGE} anos.`;
+  if (p.pot >= POT_HARD_CAP) return "Já está no limite máximo.";
+  if (overallBase(p) < p.pot) return "Tem de atingir primeiro o potencial atual.";
+  if ((game.club.buildings.treino ?? 0) < ELITE_MIN_TRAINING) return `Precisas do Centro de Treino no nível ${ELITE_MIN_TRAINING}.`;
+  if (game.players.filter((x) => x.eliteUntil).length >= ELITE_SLOTS) return `Só ${ELITE_SLOTS} jogadores em programa ao mesmo tempo.`;
+  if (game.club.money < eliteCost(p)) return "Dinheiro insuficiente.";
+  return null;
+};
 
 /* ---------- Energia / moral ---------- */
 export const FITNESS_MATCH_COST = 22;

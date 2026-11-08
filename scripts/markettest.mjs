@@ -31,7 +31,8 @@ await db.prepare("UPDATE club SET money = 100000 WHERE user_id = 2").run();
 console.log("\n[1] Listar: só vê vendas de OUTROS managers");
 const seller = await club.loadGame(1);
 const player = seller.players[5];
-const PRICE = 4000;
+const { playerValue } = await import("../src/engine/constants.js");
+const PRICE = playerValue(player);
 const sellOk = await club.sellPlayer(1, player.id, PRICE, now);
 check("pôr à venda aceite (nível 3)", sellOk.ok, JSON.stringify(sellOk));
 
@@ -60,7 +61,7 @@ const sCount = sBefore.players.length, bCount = bBefore.players.length;
 const buy = await club.buyTransfer(2, listing.id, now);
 check("compra aceite", buy.ok && buy.price === PRICE, JSON.stringify(buy));
 const sAfter = await club.loadGame(1), bAfter = await club.loadGame(2);
-check("vendedor recebeu exatamente o preço", sAfter.club.money === sMoney + PRICE, `(${sMoney} → ${sAfter.club.money})`);
+check("vendedor recebeu o preço menos 10% de comissão", sAfter.club.money === sMoney + Math.round(PRICE * 0.9), `(${sMoney} → ${sAfter.club.money})`);
 check("comprador pagou exatamente o preço", bAfter.club.money === bMoney - PRICE, `(${bMoney} → ${bAfter.club.money})`);
 check("vendedor perdeu 1 jogador", sAfter.players.length === sCount - 1, `(${sCount} → ${sAfter.players.length})`);
 check("comprador ganhou 1 jogador", bAfter.players.length === bCount + 1, `(${bCount} → ${bAfter.players.length})`);
@@ -77,7 +78,7 @@ console.log("\n[5] Plantel cheio bloqueia a compra");
 // enche o comprador até ao teto e tenta comprar outra venda
 const seller2 = await club.loadGame(1);
 const p2 = seller2.players[3];
-await club.sellPlayer(1, p2.id, 500, now);
+await club.sellPlayer(1, p2.id, playerValue(p2), now);
 let buyer = await club.loadGame(2);
 while (buyer.players.length < SQUAD_CAP) { buyer.players.push({ ...buyer.players[0], id: `filler-${buyer.players.length}` }); }
 await club.persistGame(2, buyer);

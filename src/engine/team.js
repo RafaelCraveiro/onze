@@ -4,7 +4,7 @@ import { FORMATIONS, overallAt, lineOf } from "./constants.js";
 import { botLineup } from "./generation.js";
 import { mulberry32 } from "./names.js";
 
-export const isAvailable = (p) => (p.injuryMin ?? 0) <= 0 && p.suspension <= 0;
+export const isAvailable = (p) => (p.injuryMin ?? 0) <= 0 && p.suspension <= 0 && !p.eliteUntil;
 
 /* Escolhe o melhor XI disponível para a formação (guloso por overall no slot). */
 export const autoPickXI = (players, formation) => {

@@ -1,4 +1,4 @@
-/* Servidor de produção do Onze: API + jogo compilado (dist/).
+/* Servidor de produção do Touchline: API + jogo compilado (dist/).
    Correr: npm run build && npm run server  →  http://localhost:4321 */
 
 import express from "express";
@@ -13,4 +13,4 @@ app.use(express.static(dist));
 app.get(/^(?!\/api).*/, (_req, res) => res.sendFile(path.join(dist, "index.html")));
 
 const PORT = process.env.PORT ?? 4321;
-app.listen(PORT, () => console.log(`Onze online em http://localhost:${PORT}`));
+app.listen(PORT, () => console.log(`Touchline online em http://localhost:${PORT}`));

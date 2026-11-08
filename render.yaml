@@ -8,7 +8,7 @@
 # adormece ao fim de ~15 min parado, mas já não perde dados.
 services:
   - type: web
-    name: onze
+    name: touchline
     runtime: node
     plan: free
     buildCommand: npm install --include=dev && npm run build

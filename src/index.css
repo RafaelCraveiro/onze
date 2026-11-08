@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-/* Sistema visual do Onze: muda-se aqui para mudar o jogo todo. */
+/* Sistema visual do Touchline: muda-se aqui para mudar o jogo todo. */
 :root {
   color-scheme: dark;
   --bg: #0b0f14;

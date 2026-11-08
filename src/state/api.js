@@ -1,4 +1,4 @@
-/* Cliente da API do Onze — contas online, plantel e economia SEMPRE do servidor.
+/* Cliente da API do Touchline — contas online, plantel e economia SEMPRE do servidor.
    O cliente nunca guarda dinheiro/jogadores como fonte de verdade: cada ação
    económica é um pedido ao servidor, que valida e responde com o resultado. */
 
@@ -41,6 +41,7 @@ export const apiSetLineup = (formation, starters) => call("POST", "/api/lineup",
 export const apiSetStyle = (style) => call("POST", "/api/tactics", { style });
 
 export const apiFocus = (playerId, focus) => call("POST", `/api/squad/${playerId}/focus`, { focus });
+export const apiElite = (playerId) => call("POST", `/api/squad/${playerId}/elite`);
 export const apiRenew = (playerId) => call("POST", `/api/squad/${playerId}/renew`);
 export const apiLeague = () => call("GET", "/api/league");
 export const apiLeagueMatch = (round) => call("GET", `/api/league/match/${round}`);
@@ -75,6 +76,10 @@ export const API_ERROR_PT = {
   "ja-ativo": "Já está ativo.",
   "atributo-invalido": "Atributo inválido.",
   "contrato-maximo": "O contrato já está no máximo.",
+  "preco-fora-limites": "O preço tem de estar entre 50% e 200% do valor do jogador.",
+  "jogador-bloqueado": "Este jogador foi comprado há pouco tempo e ainda não pode ser revendido.",
+  "jogador-em-treino": "Este jogador está no Treino de Elite.",
+  "elite-indisponivel": "Este jogador não pode fazer o Treino de Elite agora.",
   "jogo-indisponivel": "Este jogo já não está disponível.",
   "perfil-inexistente": "Esse manager não existe (ou é um bot).",
   "listagem-inexistente": "Essa listagem já não está disponível.",

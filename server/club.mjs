@@ -1,7 +1,7 @@
 /* Plantel e economia autoritários no servidor. */
 
 import {
-  STARTING_MONEY, SQUAD_MIN, SQUAD_CAP, BUILDINGS, buildingCost, BOOSTERS,
+  STARTING_MONEY, TRANSFER_TAX, RESALE_LOCK_MS, salePriceRange, eliteBlock, SQUAD_MIN, SQUAD_CAP, BUILDINGS, buildingCost, BOOSTERS,
   MARKET_UNLOCK_LEVEL, FORMATIONS, STYLES,
   SKILLS, overallBase, playerValue, renewCost, lastAgeBoundary, convertLegacyPlayer, cupTierOf,
 } from "../src/engine/constants.js";
@@ -9,7 +9,7 @@ import { genInitialSquad } from "../src/engine/generation.js";
 import { autoPickXI, prepareUserTeam } from "../src/engine/team.js";
 import { canBuy, canSell, refreshMarket } from "../src/engine/market.js";
 import { processTime } from "../src/engine/realtime.js";
-import { applyUserResult, pushNews } from "../src/engine/progress.js";
+import { applyUserResult, pushNews, startElite } from "../src/engine/progress.js";
 
 let db;
 export const initClub = async (database) => {
@@ -48,6 +48,9 @@ export const initClub = async (database) => {
     ALTER TABLE players ADD COLUMN IF NOT EXISTS traits TEXT NOT NULL DEFAULT '[]';
     ALTER TABLE players ADD COLUMN IF NOT EXISTS focus TEXT;
     ALTER TABLE players ADD COLUMN IF NOT EXISTS contract DOUBLE PRECISION;
+    ALTER TABLE players ADD COLUMN IF NOT EXISTS elite INT NOT NULL DEFAULT 0;
+    ALTER TABLE players ADD COLUMN IF NOT EXISTS elite_until DOUBLE PRECISION NOT NULL DEFAULT 0;
+    ALTER TABLE players ADD COLUMN IF NOT EXISTS locked_until DOUBLE PRECISION NOT NULL DEFAULT 0;
     ALTER TABLE club ADD COLUMN IF NOT EXISTS next_pay_at DOUBLE PRECISION NOT NULL DEFAULT 0;
     ALTER TABLE club ADD COLUMN IF NOT EXISTS schema_v INT NOT NULL DEFAULT 1;
   `);
@@ -65,6 +68,7 @@ const rowToPlayer = (row) => convertLegacyPlayer({
   fitness: row.fitness, morale: row.morale, injuryMin: row.injury_min, suspension: row.suspension,
   stats: safeJSON(row.stats, { games: 0, goals: 0, assists: 0 }),
   trainingXp: row.training_xp ?? 0,
+  elite: row.elite ?? 0, eliteUntil: row.elite_until ?? 0, lockedUntil: row.locked_until ?? 0,
   ...(row.selling != null ? { selling: row.selling } : {}),
 });
 
@@ -76,13 +80,13 @@ const identityOf = async (userId) => {
 // um único INSERT com todas as linhas: cada ida ao Supabase custa tempo de rede
 const insertPlayers = async (userId, players) => {
   if (!players.length) return;
-  const row = `(${Array(20).fill("?").join(", ")})`;
+  const row = `(${Array(23).fill("?").join(", ")})`;
   const params = players.flatMap((p, seq) => [
     p.id, userId, p.name, p.nat, p.flag, p.pos, p.age, p.pot ?? p.pot, JSON.stringify(p.skills ?? {}),
     p.fitness ?? 100, p.morale ?? 0, p.injuryMin ?? 0, p.suspension ?? 0,
-    JSON.stringify(p.stats ?? { games: 0, goals: 0, assists: 0 }), p.selling ?? null, Math.max(0, p.trainingXp ?? 0), seq, JSON.stringify(p.traits ?? []), p.focus ?? null, p.contract ?? 3,
+    JSON.stringify(p.stats ?? { games: 0, goals: 0, assists: 0 }), p.selling ?? null, Math.max(0, p.trainingXp ?? 0), seq, JSON.stringify(p.traits ?? []), p.focus ?? null, p.contract ?? 3, p.elite ?? 0, p.eliteUntil ?? 0, p.lockedUntil ?? 0,
   ]);
-  await db.prepare(`INSERT INTO players (id, user_id, name, nat, flag, pos, age, talent, skills, fitness, morale, injury_min, suspension, stats, selling, training_xp, seq, traits, focus, contract)
+  await db.prepare(`INSERT INTO players (id, user_id, name, nat, flag, pos, age, talent, skills, fitness, morale, injury_min, suspension, stats, selling, training_xp, seq, traits, focus, contract, elite, elite_until, locked_until)
     VALUES ${players.map(() => row).join(", ")}`).run(...params);
 };
 
@@ -278,7 +282,7 @@ export const buyListing = async (userId, listingId, now = Date.now()) => {
   const block = canBuy(game, listing);
   if (block) return { error: "nao-permitido", detail: block };
   game.club.money -= listing.price;
-  game.players.push(listing.player);
+  game.players.push({ ...listing.player, lockedUntil: now + RESALE_LOCK_MS });
   game.market.listings = game.market.listings.filter((l) => l.id !== listingId);
   pushNews(game, "transfer", "Contratação", `${listing.player.name} chegou ao clube como agente livre, por ${listing.price}€.`);
   await persistGame(userId, game);
@@ -295,9 +299,13 @@ export const sellPlayer = async (userId, playerId, price, now = Date.now()) => {
   if (block) return { error: "nao-permitido", detail: block };
   const p = game.players.find((p) => p.id === playerId);
   if (!p) return { error: "jogador-inexistente" };
-  // teto generoso (evita "lavar" dinheiro entre contas com preços absurdos)
-  const cap = Math.max(20000, playerValue(p) * 30);
-  p.selling = Math.max(50, Math.min(cap, Math.round(price)));
+  if ((p.lockedUntil ?? 0) > now) return { error: "jogador-bloqueado" };
+  if (p.eliteUntil) return { error: "jogador-em-treino" };
+  // sem esta banda, duas contas podiam passar estrelas ou dinheiro uma à outra
+  const [min, max] = salePriceRange(p);
+  const asked = Math.round(price);
+  if (asked < min || asked > max) return { error: "preco-fora-limites" };
+  p.selling = asked;
   await persistGame(userId, game);
   return { ok: true };
 };
@@ -370,14 +378,15 @@ export const buyTransfer = async (buyerId, listingId, now = Date.now()) => {
   }
 
   const soldPrice = sp.selling;
-  const bought = { ...sp, contract: 3 };
+  const bought = { ...sp, contract: 3, lockedUntil: now + RESALE_LOCK_MS };
   delete bought.selling;
 
   // sai do vendedor
   seller.players = seller.players.filter((x) => x.id !== playerId);
   seller.lineup.starters = (seller.lineup.starters ?? []).filter((id) => id !== playerId);
-  seller.club.money += soldPrice;
-  pushNews(seller, "transfer", "Jogador vendido", `${bought.name} foi transferido para ${buyer.club.name} por ${soldPrice}€.`);
+  const sellerGets = Math.round(soldPrice * (1 - TRANSFER_TAX));
+  seller.club.money += sellerGets;
+  pushNews(seller, "transfer", "Jogador vendido", `${bought.name} foi transferido para ${buyer.club.name} por ${soldPrice}€. Recebeste ${sellerGets}€ (comissão de 10%).`);
 
   // entra no comprador
   buyer.players.push(bought);
@@ -473,6 +482,17 @@ export const renewPlayer = async (userId, playerId, now = Date.now()) => {
   p.contract = Math.min(5, p.contract + 2);
   await persistGame(userId, game);
   return { ok: true };
+};
+
+export const trainElite = async (userId, playerId, now = Date.now()) => {
+  const game = await tickClub(userId, now);
+  const p = game.players.find((x) => x.id === playerId);
+  if (!p) return { error: "jogador-inexistente" };
+  const block = eliteBlock(game, p);
+  if (block) return { error: "elite-indisponivel", detail: block };
+  const cost = startElite(game, p, now);
+  await persistGame(userId, game);
+  return { ok: true, cost };
 };
 
 export const cupTierFor = async (userId, now = Date.now()) => cupTierOf(await userLevel(userId, now));

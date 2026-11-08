@@ -54,7 +54,7 @@ export default function PreMatchModal({ game, actions, pre, onClose, onPlay }) {
         )}
         {pre.kind === "amigavel" && (
           <p className="box-cream mb-3 rounded-md px-3 py-2 text-sm text-[var(--t2)]">
-            Jogo amigável contra um manager do teu nível — escolhe o onze e joga.
+            Jogo amigável contra um manager do teu nível: os jogadores evoluem, mas não dá dinheiro.
           </p>
         )}
 

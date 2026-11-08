@@ -10,7 +10,7 @@ import { autoPickXI } from "../engine/team.js";
 import { buildTimeline } from "../engine/timeline.js";
 import {
   getToken, setToken, apiRegister, apiLogin, apiLogout, apiState,
-  apiSetLineup, apiSetStyle, apiFocus, apiRenew, apiLeague, apiLeagueMatch,
+  apiSetLineup, apiSetStyle, apiFocus, apiRenew, apiElite, apiLeague, apiLeagueMatch,
   apiBuy, apiSell, apiCancelSale, apiRelease, apiUpgrade, apiBooster, apiFriendly,
   apiTransfers, apiBuyTransfer,
   errPt,
@@ -245,6 +245,7 @@ export const useGame = () => {
     /* ---------- Jogadores ---------- */
     setFocus: (playerId, focus) => runEconomic(() => apiFocus(playerId, focus)),
     renewPlayer: (playerId) => runEconomic(() => apiRenew(playerId)),
+    trainElite: (playerId) => runEconomic(() => apiElite(playerId)),
 
     /* ---------- Liga ---------- */
     refreshLeague,

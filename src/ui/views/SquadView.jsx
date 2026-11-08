@@ -23,6 +23,7 @@ export const PlayerCard = ({ p, onClick, showWage = false }) => {
           {showWage && <span>{fmtMoney(wagePerDay(p))}/dia</span>}
           {(p.injuryMin ?? 0) > 0 && <span className="font-semibold text-[var(--danger)]">lesionado {fmtDur(p.injuryMin)}</span>}
           {p.suspension > 0 && <span className="font-semibold text-[var(--danger)]">castigo {p.suspension}j</span>}
+          {!!p.eliteUntil && <span className="font-semibold text-[var(--gold)]">treino de elite</span>}
           {p.selling && <span className="font-semibold text-[var(--gold)]">à venda</span>}
           {p.contract <= 1 && <span className="font-semibold text-[var(--gold)]">contrato a acabar</span>}
         </p>

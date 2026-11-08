@@ -5,11 +5,11 @@ import { useState } from "react";
 import { Btn, PosBadge, Talent, Bar } from "./bits.jsx";
 import {
   overallBase, overallAt, POSITIONS, POS_LABEL, SKILLS, SKILL_LABEL, playerValue, wagePerDay, renewCost,
-  LINE_LABEL, lineOf, TRAITS, RATING_WEIGHTS,
+  LINE_LABEL, lineOf, TRAITS, RATING_WEIGHTS, salePriceRange, eliteCost, eliteBlock, ELITE_COSTS, ELITE_DAYS,
 } from "../../engine/constants.js";
 import { canSell } from "../../engine/market.js";
 import { fmtDur } from "../../engine/progress.js";
-import { fmtMoney, overallColor } from "../helpers.js";
+import { fmtMoney, fmtWhen, overallColor } from "../helpers.js";
 
 const Card = ({ title, children }) => (
   <section className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4">
@@ -37,6 +37,12 @@ export default function PlayerPage({ game, actions, page, onBack, onShowProfile 
   const attrs = SKILLS.filter((s) => weights[s] > 0 || (p.skills[s] ?? 0) >= 30);
   const best = POSITIONS.filter((x) => x !== p.pos && overallAt(p, x) >= ovr - 6).slice(0, 3);
   const cost = renewCost(p);
+  const [minPrice, maxPrice] = salePriceRange(p);
+  const locked = own && (p.lockedUntil ?? 0) > Date.now();
+  const priceBad = price < minPrice || price > maxPrice;
+  const eliteLevel = p.elite ?? 0;
+  const eliteDone = eliteLevel >= ELITE_COSTS.length;
+  const eliteWhy = own ? eliteBlock(game, p) : null;
 
   return (
     <div className="flex flex-col gap-4">
@@ -103,7 +109,7 @@ export default function PlayerPage({ game, actions, page, onBack, onShowProfile 
               <Fact label="Valor" value={fmtMoney(playerValue(p))} />
               <Fact label="Potencial" value={<Talent t={p.pot} />} />
               <Fact label="Salário" value={`${fmtMoney(wagePerDay(p))}/dia`} />
-              <Fact label="Contrato" value={`${p.contract} época${p.contract === 1 ? "" : "s"}`} />
+              <Fact label="Contrato" value={`${p.contract} ano${p.contract === 1 ? "" : "s"}`} />
               {p.fitness != null && <Fact label="Energia" value={`${Math.round(p.fitness)}%`} />}
               {p.morale != null && <Fact label="Moral" value={Math.round(p.morale)} />}
               {p.stats && <Fact label="Jogos" value={p.stats.games ?? 0} />}
@@ -121,7 +127,7 @@ export default function PlayerPage({ game, actions, page, onBack, onShowProfile 
             <Card title="Gestão">
               <div className="flex flex-col gap-2">
                 <Btn disabled={game.club.money < cost || p.contract >= 5} title={p.contract >= 5 ? "Contrato já no máximo" : ""} onClick={() => actions.renewPlayer(p.id)}>
-                  Renovar +2 épocas ({fmtMoney(cost)})
+                  Renovar +2 anos ({fmtMoney(cost)})
                 </Btn>
                 {p.selling ? (
                   <>
@@ -129,15 +135,36 @@ export default function PlayerPage({ game, actions, page, onBack, onShowProfile 
                     <Btn kind="dark" onClick={() => actions.cancelSale(p.id)}>Retirar do mercado</Btn>
                   </>
                 ) : (
+                  <>
                   <div className="flex gap-2">
                     <input type="number" aria-label="Preço de venda" value={price} onChange={(e) => setPrice(+e.target.value)} className="tnum w-full min-w-0 rounded-lg border border-[var(--line)] bg-[var(--s2)] px-2 py-2 text-sm text-[var(--t1)]" />
-                    <Btn kind="gold" disabled={!!sellBlock} title={sellBlock ?? ""} onClick={() => actions.listForSale(p.id, price)}>Vender</Btn>
+                    <Btn kind="gold" disabled={!!sellBlock || priceBad || locked || !!p.eliteUntil} title={sellBlock ?? ""} onClick={() => actions.listForSale(p.id, price)}>Vender</Btn>
                   </div>
+                  <p className={`mt-1 text-[11px] ${priceBad ? "font-semibold text-[var(--danger)]" : "text-[var(--t3)]"}`}>
+                    {priceBad ? `O preço tem de estar entre ${fmtMoney(minPrice)} e ${fmtMoney(maxPrice)}.` : `Recebes ${fmtMoney(Math.round(price * 0.9))}: o mercado fica com 10% de comissão.`}
+                  </p>
+                  {locked && <p className="text-[11px] font-semibold text-[var(--gold)]">Comprado há pouco: pode ser revendido a partir de {fmtWhen(p.lockedUntil)}.</p>}
+                  </>
                 )}
                 <button className="py-1 text-xs font-semibold text-[var(--danger)] disabled:opacity-40" disabled={!!sellBlock} title={sellBlock ?? ""} onClick={() => { actions.releasePlayer(p.id); onBack(); }}>
                   Dispensar jogador
                 </button>
               </div>
+            </Card>
+          )}
+
+          {own && (
+            <Card title="Treino de Elite">
+              <p className="mb-3 text-xs text-[var(--t2)]">Sobe o potencial 1 ponto além do limite. O jogador fica {ELITE_DAYS} dias sem jogar e depois tem de jogar para o atingir.</p>
+              <p className="tnum mb-2 text-sm font-bold">Programas feitos: {eliteLevel} de {ELITE_COSTS.length}</p>
+              {p.eliteUntil ? (
+                <p className="text-sm font-semibold text-[var(--gold)]">Em programa até {fmtWhen(p.eliteUntil)}.</p>
+              ) : eliteDone ? null : (
+                <>
+                  <Btn kind="gold" disabled={!!eliteWhy} title={eliteWhy ?? ""} onClick={() => actions.trainElite(p.id)}>Iniciar ({fmtMoney(eliteCost(p))})</Btn>
+                  {eliteWhy && <p className="mt-2 text-[11px] text-[var(--t3)]">{eliteWhy}</p>}
+                </>
+              )}
             </Card>
           )}
         </div>

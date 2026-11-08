@@ -2,9 +2,9 @@
 
 import {
   XP_WIN, XP_DRAW, XP_LOSS, MAX_LEVEL, xpForNext, SKILLS, SKILL_CAP, RATING_WEIGHTS, lineOf, overallBase, growthCost,
-  REWARD_WIN_BASE, REWARD_DRAW_BASE, REWARD_LOSS_BASE, REWARD_WIN_PER_LEVEL, FRIENDLY_REWARD_MULT,
+  REWARD_WIN_BASE, REWARD_DRAW_BASE, REWARD_LOSS_BASE, REWARD_WIN_PER_LEVEL,
   FITNESS_MATCH_COST, gateIncome, INBOX_CAP, HISTORY_CAP,
-  MATCH_XP_BASE, MATCH_XP_MULT,
+  MATCH_XP_BASE, MATCH_XP_MULT, eliteCost, ELITE_DAYS, POT_HARD_CAP, HOUR_MS,
 } from "./constants.js";
 
 export const pushNews = (game, type, title, text, at = Date.now()) => {
@@ -67,14 +67,12 @@ export const applyUserResult = (game, { kind, userSide, result, oppName, isHome,
   applyClubXp(game, Math.round((outcome === "V" ? XP_WIN : outcome === "E" ? XP_DRAW : XP_LOSS) * repMult));
 
   // Dinheiro do jogo
-  // Falta de comparência: nem prémio de jogo nem bilheteira.
+  // Só a liga paga por jogo: os amigáveis são ilimitados e as taças já têm prémios.
   let reward = 0, tickets = 0;
-  if (!forfeit) {
-    reward = outcome === "V" ? REWARD_WIN_BASE + game.club.level * REWARD_WIN_PER_LEVEL : outcome === "E" ? REWARD_DRAW_BASE : REWARD_LOSS_BASE;
-    if (kind === "amigavel") reward = Math.round(reward * FRIENDLY_REWARD_MULT);
-    if (kind === "liga") reward = Math.round(reward * 1.4);
+  if (!forfeit && kind === "liga") {
+    reward = Math.round((outcome === "V" ? REWARD_WIN_BASE + game.club.level * REWARD_WIN_PER_LEVEL : outcome === "E" ? REWARD_DRAW_BASE : REWARD_LOSS_BASE) * 1.4);
     // bilheteira: 1€ por adepto PRESENTE — limitado pelos lugares do estádio (começa em 0)
-    if (isHome) tickets = Math.round(gateIncome(game.club.buildings.estadio, game.club.fans ?? 0) * (kind === "amigavel" ? 0.5 : 1));
+    if (isHome) tickets = gateIncome(game.club.buildings.estadio, game.club.fans ?? 0);
     game.club.money += reward + tickets;
   }
 
@@ -131,6 +129,17 @@ export const applyUserResult = (game, { kind, userSide, result, oppName, isHome,
   if (game.history.length > HISTORY_CAP) game.history.length = HISTORY_CAP;
 
   return { outcome, reward: reward + tickets, xpGained };
+};
+
+/* Treino de Elite: já validado com eliteBlock. Sobe o potencial e o jogador fica parado. */
+export const startElite = (game, p, now = Date.now()) => {
+  const cost = eliteCost(p);
+  game.club.money -= cost;
+  p.elite = (p.elite ?? 0) + 1;
+  p.pot = Math.min(POT_HARD_CAP, p.pot + 1);
+  p.eliteUntil = now + ELITE_DAYS * 24 * HOUR_MS;
+  pushNews(game, "squad", "Treino de Elite", `${p.name} começou o programa: potencial ${p.pot}. Fica ${ELITE_DAYS} dias sem jogar.`, now);
+  return cost;
 };
 
 export const fmtDur = (min) => {

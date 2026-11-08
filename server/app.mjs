@@ -1,4 +1,4 @@
-/* API do Onze — contas online com base de dados Postgres (Supabase).
+/* API do Touchline — contas online com base de dados Postgres (Supabase).
    - Registo por EMAIL (único) + password encriptada (scrypt)
    - O nome do jogador É o nome do clube (único, sem distinção de maiúsculas)
    - Plantel, dinheiro, mercado, construções e taças são AUTORITÁRIOS no
@@ -165,6 +165,9 @@ app.post("/api/tactics", auth, async (req, res) => {
 
 app.post("/api/squad/:id/focus", auth, async (req, res) => {
   reply(res, await club.setFocus(req.userId, req.params.id, req.body?.focus ?? null, Date.now()));
+});
+app.post("/api/squad/:id/elite", auth, async (req, res) => {
+  reply(res, await club.trainElite(req.userId, req.params.id, Date.now()));
 });
 app.post("/api/squad/:id/renew", auth, async (req, res) => {
   reply(res, await club.renewPlayer(req.userId, req.params.id, Date.now()));

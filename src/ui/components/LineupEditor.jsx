@@ -108,7 +108,7 @@ export default function LineupEditor({ game, actions, compact = false }) {
                     <PosBadge pos={p.pos} />
                     <span className="min-w-0 flex-1 truncate">{p.name}</span>
                     {inXI && <span className="text-[10px] text-[var(--info)]">no onze (troca)</span>}
-                    {unavailable && <span className="text-[10px] text-[var(--danger)]">{(p.injuryMin ?? 0) > 0 ? "lesionado" : "castigado"}</span>}
+                    {unavailable && <span className="text-[10px] text-[var(--danger)]">{(p.injuryMin ?? 0) > 0 ? "lesionado" : p.eliteUntil ? "em treino" : "castigado"}</span>}
                     <b style={{ color: overallColor(overallAt(p, slots[selSlot][0])) }}>{overallAt(p, slots[selSlot][0])}</b>
                   </button>
                 );

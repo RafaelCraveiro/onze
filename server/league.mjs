@@ -1,24 +1,29 @@
-/* Ligas: cada época dura 15 dias, igual ao ano do calendário comum.
-   Grupos de 10 clubes (managers reais + bots), 18 jornadas, uma a cada 20 horas.
-   Não é preciso estar online: joga-se com o último onze guardado.
-   No fim: prémios, subidas (2 primeiros) e descidas (2 últimos). */
+/* Ligas: cada época tem o seu relógio, separado do envelhecimento dos jogadores.
+   Pirâmide automática (src/engine/pyramid.js): grupos de 12, sem inscrições.
+   22 jornadas, uma por dia às 04:00 UTC, jogadas com o último onze guardado. */
 
 import { simulateMatch, simQuick } from "../src/engine/match.js";
 import { prepareBotTeam } from "../src/engine/team.js";
 import { AGE_EPOCH, AGE_MS, HOUR_MS } from "../src/engine/constants.js";
 import { synthBot } from "./world.mjs";
 import * as club from "./club.mjs";
+import {
+  GROUP_SIZE as GROUP, ROUNDS, SEASON_DAYS, PROMOTED, DOWN_RANK, MIN_DIVISIONS, INACTIVE_DAYS, LATE_JOIN_ROUND,
+  divisionsFor, botLevelFor, seasonPrize, nextDivision, assignSeason,
+} from "../src/engine/pyramid.js";
 
-export const MAX_DIVISION = 4;
-const GROUP = 10;
-const ROUNDS = 18;
-const ROUND_MS = 20 * HOUR_MS;
-const PRIZE_BASE = { 1: 12000, 2: 7000, 3: 4000, 4: 2200 };
+export const MAX_DIVISION = MIN_DIVISIONS;
+const ROUND_MS = 24 * HOUR_MS;
+const FIRST_ROUND_MS = 4 * HOUR_MS;
+export const SEASON_MS = SEASON_DAYS * ROUND_MS;
+const INACTIVE_MS = INACTIVE_DAYS * ROUND_MS;
 
-export const seasonOf = (now) => Math.floor((now - AGE_EPOCH) / AGE_MS);
-const seasonStart = (s) => AGE_EPOCH + s * AGE_MS;
-const roundDue = (s, r) => seasonStart(s) + 10 * HOUR_MS + r * ROUND_MS;
-const botLevelFor = (division) => (MAX_DIVISION - division) * 3 + 1;
+/* a numeração continua a da época que estava a decorrer quando o relógio foi separado */
+const FIRST_SEASON = 20;
+const LEAGUE_EPOCH = AGE_EPOCH + FIRST_SEASON * AGE_MS;
+export const seasonOf = (now) => FIRST_SEASON + Math.floor((now - LEAGUE_EPOCH) / SEASON_MS);
+export const seasonStart = (s) => LEAGUE_EPOCH + (s - FIRST_SEASON) * SEASON_MS;
+const roundDue = (s, r) => seasonStart(s) + FIRST_ROUND_MS + r * ROUND_MS;
 const safeJSON = (s) => { try { return JSON.parse(s); } catch { return {}; } };
 
 let db;
@@ -48,6 +53,11 @@ export const initLeague = async (database) => {
     );
     CREATE INDEX IF NOT EXISTS idx_league_fixtures_due ON league_fixtures(due_at) WHERE home_score IS NULL;
     CREATE TABLE IF NOT EXISTS league_memo (user_id BIGINT PRIMARY KEY, division INT NOT NULL);
+    ALTER TABLE league_memo ADD COLUMN IF NOT EXISTS last_rank INT;
+    ALTER TABLE league_memo ADD COLUMN IF NOT EXISTS last_seen DOUBLE PRECISION;
+    ALTER TABLE league_clubs ADD COLUMN IF NOT EXISTS late INT NOT NULL DEFAULT 0;
+    ALTER TABLE league_fixtures ADD COLUMN IF NOT EXISTS stats TEXT;
+    CREATE INDEX IF NOT EXISTS idx_league_fixtures_replay ON league_fixtures(due_at) WHERE result IS NOT NULL;
   `);
 };
 
@@ -67,29 +77,38 @@ const roundRobin = (n) => {
   return [...half, ...half.map((g) => g.map(([a, b]) => [b, a]))];
 };
 
-const createGroup = async (season, division, grp, users) => {
+const insertMany = async (head, rowLen, rows) => {
+  if (!rows.length) return;
+  const row = `(${Array(rowLen).fill("?").join(", ")})`;
+  await db.prepare(`${head} VALUES ${rows.map(() => row).join(", ")}`).run(...rows.flat());
+};
+
+const clubInfo = async (ids) => {
+  if (!ids.length) return new Map();
+  const rows = await db.prepare(`SELECT u.id, u.club_name, u.emblem, c.level FROM users u JOIN club c ON c.user_id = u.id WHERE u.id IN (${ids.map(() => "?").join(", ")})`).all(...ids);
+  return new Map(rows.map((r) => [Number(r.id), r]));
+};
+
+const createGroup = async (season, division, grp, users, info) => {
   const id = `s${season}-d${division}-g${grp}`;
   await db.prepare("INSERT INTO leagues (id, season, division, grp) VALUES (?, ?, ?, ?)").run(id, season, division, grp);
   const rngSeed = (season * 7919 + division * 131 + grp * 17) >>> 0;
   const level = botLevelFor(division);
+  const clubs = [];
   for (let slot = 0; slot < GROUP; slot++) {
     if (users[slot] != null) {
-      const info = await club.userInfoFor(users[slot]);
-      await db.prepare("INSERT INTO league_clubs (league_id, slot, kind, user_id, club_name, emblem, level) VALUES (?, ?, 'user', ?, ?, ?, ?)")
-        .run(id, slot, users[slot], info.clubName, info.emblem, info.level);
+      const u = info.get(Number(users[slot]));
+      clubs.push([id, slot, "user", users[slot], null, u.club_name, u.emblem, u.level, null]);
     } else {
       const b = synthBot(level, rngSeed + slot * 991, String(slot + 1));
-      await db.prepare("INSERT INTO league_clubs (league_id, slot, kind, bot_id, club_name, emblem, level, str) VALUES (?, ?, 'bot', ?, ?, ?, ?, ?)")
-        .run(id, slot, b.id, BOT_NAME(rngSeed, slot), JSON.stringify(b.emblem), b.level, b.str);
+      clubs.push([id, slot, "bot", null, b.id, BOT_NAME(rngSeed, slot), JSON.stringify(b.emblem), b.level, b.str]);
     }
   }
+  await insertMany("INSERT INTO league_clubs (league_id, slot, kind, user_id, bot_id, club_name, emblem, level, str)", 9, clubs);
   const schedule = roundRobin(GROUP);
-  for (let r = 0; r < ROUNDS; r++) {
-    for (let m = 0; m < schedule[r].length; m++) {
-      await db.prepare("INSERT INTO league_fixtures (league_id, round, midx, home_slot, away_slot, due_at) VALUES (?, ?, ?, ?, ?, ?)")
-        .run(id, r, m, schedule[r][m][0], schedule[r][m][1], roundDue(season, r));
-    }
-  }
+  const fixtures = [];
+  for (let r = 0; r < ROUNDS; r++) schedule[r].forEach(([h, a], m) => fixtures.push([id, r, m, h, a, roundDue(season, r)]));
+  await insertMany("INSERT INTO league_fixtures (league_id, round, midx, home_slot, away_slot, due_at)", 6, fixtures);
   return id;
 };
 
@@ -103,6 +122,12 @@ const applyFixture = async (leagueId, f, hs, as) => {
   await upd(f.home_slot, hs, as);
   await upd(f.away_slot, as, hs);
 };
+
+/* o que fica para sempre de cada jogo; a repetição 2D (result) só existe na última jornada */
+const matchStats = (r) => ({
+  possession: r.possession, shots: r.shots, onTarget: r.onTarget, corners: r.corners, fouls: r.fouls, xg: r.xg,
+  mvp: r.mvp?.name ?? null,
+});
 
 const playFixture = async (f, clubs, now) => {
   const home = clubs.find((c) => c.slot === f.home_slot), away = clubs.find((c) => c.slot === f.away_slot);
@@ -119,8 +144,8 @@ const playFixture = async (f, clubs, now) => {
     if (home.kind === "user") await club.applyMatchResult(home.user_id, { kind: "liga", isHome: true, result, oppName: away.club_name }, now);
     if (away.kind === "user") await club.applyMatchResult(away.user_id, { kind: "liga", isHome: false, result, oppName: home.club_name }, now);
   }
-  await db.prepare("UPDATE league_fixtures SET home_score = ?, away_score = ?, result = ? WHERE league_id = ? AND round = ? AND midx = ?")
-    .run(hs, as, result ? JSON.stringify(result) : null, f.league_id, f.round, f.midx);
+  await db.prepare("UPDATE league_fixtures SET home_score = ?, away_score = ?, result = ?, stats = ? WHERE league_id = ? AND round = ? AND midx = ?")
+    .run(hs, as, result ? JSON.stringify(result) : null, result ? JSON.stringify(matchStats(result)) : null, f.league_id, f.round, f.midx);
   await applyFixture(f.league_id, f, hs, as);
 };
 
@@ -130,42 +155,56 @@ const playDue = async (upTo, now, where = "") => {
   for (const f of due) {
     if (!cache.has(f.league_id)) cache.set(f.league_id, await db.prepare("SELECT * FROM league_clubs WHERE league_id = ?").all(f.league_id));
     await playFixture(f, cache.get(f.league_id), now);
-    const fresh = await db.prepare("SELECT * FROM league_clubs WHERE league_id = ?").all(f.league_id);
-    cache.set(f.league_id, fresh);
+  }
+  if (due.length) {
+    /* todos os grupos têm o mesmo calendário: apaga as repetições anteriores à última jornada jogada */
+    const last = await db.prepare("SELECT MAX(due_at) AS t FROM league_fixtures WHERE home_score IS NOT NULL").get();
+    await db.prepare("UPDATE league_fixtures SET result = NULL WHERE result IS NOT NULL AND due_at < ?").run(last.t);
   }
 };
 
 const ranking = (clubs) => [...clubs].sort((a, b) => b.pts - a.pts || (b.gf - b.ga) - (a.gf - a.ga) || b.gf - a.gf || a.slot - b.slot);
 
-const closeLeague = async (lg, now) => {
+/* só contam contas ativas: as abandonadas não podem criar divisões a mais */
+const activeCount = async (now) => (await db.prepare(`SELECT COUNT(*)::int AS n FROM club c LEFT JOIN league_memo m ON m.user_id = c.user_id
+  WHERE m.last_seen IS NULL OR m.last_seen >= ?`).get(now - INACTIVE_MS)).n;
+
+const closeLeague = async (lg, now, maxDivision) => {
   const clubs = ranking(await db.prepare("SELECT * FROM league_clubs WHERE league_id = ?").all(lg.id));
   for (let i = 0; i < clubs.length; i++) {
     const c = clubs[i];
     if (c.kind !== "user") continue;
     const rank = i + 1;
-    const up = rank <= 2 && lg.division > 1;
-    const down = rank >= GROUP - 1 && lg.division < MAX_DIVISION;
-    const next = lg.division + (up ? -1 : down ? 1 : 0);
-    await db.prepare("INSERT INTO league_memo (user_id, division) VALUES (?, ?) ON CONFLICT (user_id) DO UPDATE SET division = EXCLUDED.division").run(c.user_id, next);
+    const next = nextDivision({ division: lg.division, rank, late: !!c.late, maxDivision });
+    await db.prepare("INSERT INTO league_memo (user_id, division, last_rank, last_seen) VALUES (?, ?, ?, ?) ON CONFLICT (user_id) DO UPDATE SET division = EXCLUDED.division, last_rank = EXCLUDED.last_rank")
+      .run(c.user_id, next, rank, now);
     await club.creditSeasonOutcome(c.user_id, {
-      prize: Math.round(PRIZE_BASE[lg.division] * (GROUP + 1 - rank) / GROUP),
-      rank, division: lg.division, champion: rank === 1, promoted: up, relegated: down, season: lg.season,
+      prize: seasonPrize(lg.division, rank), rank, division: lg.division, champion: rank === 1,
+      promoted: next < lg.division, relegated: next > lg.division, season: lg.season,
     }, now);
   }
   await db.prepare("UPDATE leagues SET closed = 1 WHERE id = ?").run(lg.id);
 };
 
 const buildSeason = async (s, now) => {
-  const users = (await db.prepare("SELECT user_id FROM club ORDER BY user_id").all()).map((u) => u.user_id);
-  const memo = new Map((await db.prepare("SELECT user_id, division FROM league_memo").all()).map((m) => [m.user_id, m.division]));
-  for (let d = 1; d <= MAX_DIVISION; d++) {
-    const inDiv = users.filter((u) => (memo.get(u) ?? MAX_DIVISION) === d);
-    for (let g = 0; g * GROUP < inDiv.length; g++) await createGroup(s, d, g, inDiv.slice(g * GROUP, (g + 1) * GROUP));
+  const ids = (await db.prepare("SELECT user_id FROM club ORDER BY user_id").all()).map((u) => Number(u.user_id));
+  const memo = new Map((await db.prepare("SELECT * FROM league_memo").all()).map((m) => [Number(m.user_id), m]));
+  const maxDivision = divisionsFor(await activeCount(now));
+  const cutoff = now - INACTIVE_MS;
+  const active = [];
+  for (const id of ids) {
+    const m = memo.get(id);
+    if (m?.last_seen != null && m.last_seen < cutoff) continue; // inativo: sai da pirâmide
+    if (m?.last_seen == null) await db.prepare("INSERT INTO league_memo (user_id, division, last_seen) VALUES (?, ?, ?) ON CONFLICT (user_id) DO UPDATE SET division = EXCLUDED.division, last_seen = EXCLUDED.last_seen").run(id, maxDivision, now);
+    active.push({ id, division: Math.min(m?.last_seen == null ? maxDivision : m.division, maxDivision), lastRank: m?.last_rank ?? null });
+  }
+  const info = await clubInfo(active.map((u) => u.id));
+  for (const { division, groups } of assignSeason(active, Math.max(maxDivision, divisionsFor(active.length)))) {
+    for (let g = 0; g < groups.length; g++) await createGroup(s, division, g, groups[g], info);
   }
   await db.prepare("DELETE FROM league_fixtures WHERE league_id IN (SELECT id FROM leagues WHERE season < ?)").run(s - 1);
   await db.prepare("DELETE FROM league_clubs WHERE league_id IN (SELECT id FROM leagues WHERE season < ?)").run(s - 1);
   await db.prepare("DELETE FROM leagues WHERE season < ?").run(s - 1);
-  void now;
 };
 
 /* Chamado no início dos pedidos: fecha épocas, cria a nova e joga as jornadas em atraso. */
@@ -176,7 +215,8 @@ export const tickLeague = async (now = Date.now()) => {
       const open = await db.prepare("SELECT * FROM leagues WHERE closed = 0 AND season < ?").all(s);
       if (open.length) {
         await playDue(seasonStart(s), now);
-        for (const lg of open) await closeLeague(lg, now);
+        const maxDivision = divisionsFor(await activeCount(now));
+        for (const lg of open) await closeLeague(lg, now, maxDivision);
       }
       const exists = await db.prepare("SELECT id FROM leagues WHERE season = ? LIMIT 1").get(s);
       if (!exists) await buildSeason(s, now);
@@ -198,20 +238,26 @@ export const ensureMember = async (userId, now = Date.now()) => {
   const inLeague = await db.prepare(`SELECT l.id FROM league_clubs c JOIN leagues l ON l.id = c.league_id WHERE c.user_id = ? AND l.season = ? LIMIT 1`).get(userId, s);
   if (inLeague) return inLeague.id;
   await club.initClubForUser(userId, now);
-  const memo = await db.prepare("SELECT division FROM league_memo WHERE user_id = ?").get(userId);
-  const division = memo?.division ?? MAX_DIVISION;
-  const slot = await db.prepare(`SELECT c.league_id, c.slot FROM league_clubs c JOIN leagues l ON l.id = c.league_id
-    WHERE l.season = ? AND l.division = ? AND c.kind = 'bot' ORDER BY l.grp, c.slot LIMIT 1`).get(s, division);
-  const info = await club.userInfoFor(userId, now);
-  await db.prepare("INSERT INTO league_memo (user_id, division) VALUES (?, ?) ON CONFLICT (user_id) DO NOTHING").run(userId, division);
+  const memo = await db.prepare("SELECT * FROM league_memo WHERE user_id = ?").get(userId);
+  const maxDivision = divisionsFor(await activeCount(now));
+  const away = memo?.last_seen != null && memo.last_seen < now - INACTIVE_MS;
+  const wanted = memo?.last_seen == null ? maxDivision : Math.min(maxDivision, memo.division + (away ? 2 : 0));
+  await db.prepare("INSERT INTO league_memo (user_id, division, last_seen) VALUES (?, ?, ?) ON CONFLICT (user_id) DO UPDATE SET division = EXCLUDED.division, last_seen = EXCLUDED.last_seen").run(userId, wanted, now);
+  const late = Math.floor((now - seasonStart(s) - FIRST_ROUND_MS) / ROUND_MS) + 1 >= LATE_JOIN_ROUND ? 1 : 0;
+  const findSlot = (d) => db.prepare(`SELECT c.league_id, c.slot FROM league_clubs c JOIN leagues l ON l.id = c.league_id
+    WHERE l.season = ? AND l.division = ? AND c.kind = 'bot' ORDER BY l.grp, c.slot LIMIT 1`).get(s, d);
+  const slot = (await findSlot(wanted)) ?? (wanted !== maxDivision ? await findSlot(maxDivision) : null);
+  const info = await clubInfo([Number(userId)]);
+  const u = info.get(Number(userId));
   if (slot) {
-    await db.prepare("UPDATE league_clubs SET kind = 'user', user_id = ?, bot_id = NULL, club_name = ?, emblem = ?, level = ?, str = NULL WHERE league_id = ? AND slot = ?")
-      .run(userId, info.clubName, info.emblem, info.level, slot.league_id, slot.slot);
+    await db.prepare("UPDATE league_clubs SET kind = 'user', user_id = ?, bot_id = NULL, club_name = ?, emblem = ?, level = ?, str = NULL, late = ? WHERE league_id = ? AND slot = ?")
+      .run(userId, u.club_name, u.emblem, u.level, late, slot.league_id, slot.slot);
     nextDue = 0;
     return slot.league_id;
   }
-  const grp = (await db.prepare("SELECT COUNT(*)::int AS n FROM leagues WHERE season = ? AND division = ?").get(s, division)).n;
-  const id = await createGroup(s, division, grp, [userId]);
+  const grp = (await db.prepare("SELECT COUNT(*)::int AS n FROM leagues WHERE season = ? AND division = ?").get(s, maxDivision)).n;
+  const id = await createGroup(s, maxDivision, grp, [userId], info);
+  await db.prepare("UPDATE league_clubs SET late = ? WHERE league_id = ? AND user_id = ?").run(late, id, userId);
   await playDue(now, now, `AND league_id = '${id}'`);
   nextDue = 0;
   return id;
@@ -219,10 +265,11 @@ export const ensureMember = async (userId, now = Date.now()) => {
 
 export const leagueFor = async (userId, now = Date.now()) => {
   const id = await ensureMember(userId, now);
+  await db.prepare("UPDATE league_memo SET last_seen = ? WHERE user_id = ?").run(now, userId);
   const lg = await db.prepare("SELECT * FROM leagues WHERE id = ?").get(id);
   const clubs = ranking(await db.prepare("SELECT * FROM league_clubs WHERE league_id = ?").all(id));
   const me = clubs.find((c) => Number(c.user_id) === Number(userId));
-  const fixtures = await db.prepare("SELECT league_id, round, midx, home_slot, away_slot, due_at, home_score, away_score, result IS NOT NULL AS has_result FROM league_fixtures WHERE league_id = ? ORDER BY round, midx").all(id);
+  const fixtures = await db.prepare("SELECT league_id, round, midx, home_slot, away_slot, due_at, home_score, away_score, stats, result IS NOT NULL AS has_result FROM league_fixtures WHERE league_id = ? ORDER BY round, midx").all(id);
   const nameOf = new Map(clubs.map((c) => [c.slot, c]));
   const row = (f) => ({
     round: f.round, dueAt: Number(f.due_at),
@@ -231,11 +278,12 @@ export const leagueFor = async (userId, now = Date.now()) => {
     score: f.home_score != null ? [f.home_score, f.away_score] : null,
     mine: f.home_slot === me.slot || f.away_slot === me.slot,
     watchable: !!f.has_result && (f.home_slot === me.slot || f.away_slot === me.slot),
+    stats: f.stats ? safeJSON(f.stats) : null,
   });
   const mine = fixtures.filter((f) => f.home_slot === me.slot || f.away_slot === me.slot).map(row);
   const nextRoundIdx = fixtures.find((f) => f.home_score == null)?.round ?? null;
   return {
-    season: lg.season, division: lg.division, maxDivision: MAX_DIVISION, group: lg.grp, rounds: ROUNDS,
+    season: lg.season, division: lg.division, maxDivision: divisionsFor(await activeCount(now)), group: lg.grp, rounds: ROUNDS,
     endsAt: seasonStart(lg.season + 1),
     nextRound: nextRoundIdx,
     table: clubs.map((c, i) => ({
@@ -244,7 +292,7 @@ export const leagueFor = async (userId, now = Date.now()) => {
     })),
     mine,
     roundGames: nextRoundIdx != null ? fixtures.filter((f) => f.round === nextRoundIdx).map(row) : [],
-    upTo: 2, downFrom: GROUP - 1,
+    upTo: PROMOTED, downFrom: DOWN_RANK,
   };
 };
 

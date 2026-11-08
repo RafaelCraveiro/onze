@@ -51,7 +51,7 @@ const enrolled = await call("POST", `/api/cups/${target.id}/enroll`, token, {});
 check("inscrição na taça", enrolled.body.ok === true, JSON.stringify(enrolled.body).slice(0, 150));
 
 const lg = await call("GET", "/api/league", token);
-check("a conta entra numa liga de 10 clubes", lg.body.league?.table?.length === 10, JSON.stringify(lg.body).slice(0, 150));
+check("a conta entra numa liga de 12 clubes", lg.body.league?.table?.length === 12, JSON.stringify(lg.body).slice(0, 150));
 const pid = a.body.game.players[3].id;
 check("definir foco pela API", (await call("POST", `/api/squad/${pid}/focus`, token, { focus: "fisico" })).body.ok === true);
 check("renovar pela API", (await call("POST", `/api/squad/${pid}/renew`, token, {})).body.ok === true);

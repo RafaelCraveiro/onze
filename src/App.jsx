@@ -1,4 +1,4 @@
-/* Onze — app raiz: jogo ONLINE (login/registo → jogo → jogo ao vivo). */
+/* Touchline — app raiz: jogo ONLINE (login/registo → jogo → jogo ao vivo). */
 
 import { useEffect, useState } from "react";
 import { useGame } from "./state/useGame.js";
@@ -34,8 +34,8 @@ const TABS = [
 ];
 
 const Logo = () => (
-  <p className="font-display px-3 text-4xl font-bold uppercase leading-none tracking-tight">
-    <span className="text-[var(--accent)]">On</span>ze
+  <p className="font-display px-3 text-[2.6rem] font-bold uppercase leading-none tracking-tight">
+    <span className="text-[var(--accent)]">Touch</span>line
   </p>
 );
 

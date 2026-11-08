@@ -1,10 +1,48 @@
 /* Liga: classificação da época, próximos jogos e resultados. */
 
+import { useState } from "react";
 import { Section, Btn, Pill } from "../components/bits.jsx";
 import Emblem from "../components/Emblem.jsx";
 import { fmtWhen } from "../helpers.js";
 
 const DAY = 24 * 60 * 60 * 1000;
+
+const STAT_ROWS = [
+  ["Posse", "possession", (v) => `${v}%`],
+  ["Remates", "shots", String],
+  ["À baliza", "onTarget", String],
+  ["Cantos", "corners", String],
+  ["Faltas", "fouls", String],
+  ["xG", "xg", (v) => v.toFixed(1)],
+];
+
+const ResultRow = ({ m, onWatch }) => {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded-xl bg-[var(--s2)] px-3 py-2 text-sm">
+      <div className="flex items-center gap-2">
+        <span className="w-7 text-xs text-[var(--t3)]">J{m.round + 1}</span>
+        <span className="min-w-0 flex-1 truncate text-right">{m.home}</span>
+        <b className="tnum shrink-0">{m.score[0]}-{m.score[1]}</b>
+        <span className="min-w-0 flex-1 truncate">{m.away}</span>
+        {m.stats && <Btn kind="dark" className="!px-2 !py-1 text-xs" onClick={() => setOpen((o) => !o)}>Dados</Btn>}
+        {m.watchable && <Btn kind="dark" className="!px-2 !py-1 text-xs" onClick={onWatch}>Ver</Btn>}
+      </div>
+      {open && m.stats && (
+        <div className="tnum mt-2 border-t border-[var(--line)] pt-2 text-xs">
+          {STAT_ROWS.map(([label, key, fmt]) => (
+            <div key={key} className="flex justify-between py-0.5">
+              <b className="w-12">{fmt(m.stats[key][0])}</b>
+              <span className="text-[var(--t3)]">{label}</span>
+              <b className="w-12 text-right">{fmt(m.stats[key][1])}</b>
+            </div>
+          ))}
+          {m.stats.mvp && <p className="mt-1 text-center text-[var(--t3)]">Melhor em campo: <b className="text-[var(--t1)]">{m.stats.mvp}</b></p>}
+        </div>
+      )}
+    </div>
+  );
+};
 
 export default function LeagueView({ game, actions, now }) {
   const lg = game.league;
@@ -81,22 +119,15 @@ export default function LeagueView({ game, actions, now }) {
             </tbody>
           </table>
         </div>
-        <p className="mt-2 text-[11px] text-[var(--t3)]">Os 2 primeiros sobem de divisão e os 2 últimos descem.</p>
+        <p className="mt-2 text-[11px] text-[var(--t3)]">Em cada grupo, os 2 primeiros sobem e os 4 últimos descem. Há uma jornada por dia.</p>
       </Section>
 
       <Section title="Os teus resultados">
         {played.length === 0 && <p className="text-sm text-[var(--t3)]">Ainda não há jogos disputados nesta época.</p>}
         <div className="flex flex-col gap-1.5">
-          {played.map((m) => (
-            <div key={m.round} className="flex items-center gap-2 rounded-xl bg-[var(--s2)] px-3 py-2 text-sm">
-              <span className="w-7 text-xs text-[var(--t3)]">J{m.round + 1}</span>
-              <span className="min-w-0 flex-1 truncate text-right">{m.home}</span>
-              <b className="tnum shrink-0">{m.score[0]}-{m.score[1]}</b>
-              <span className="min-w-0 flex-1 truncate">{m.away}</span>
-              {m.watchable && <Btn kind="dark" className="!px-2 !py-1 text-xs" onClick={() => actions.watchLeagueMatch(m.round)}>Ver</Btn>}
-            </div>
-          ))}
+          {played.map((m) => <ResultRow key={m.round} m={m} onWatch={() => actions.watchLeagueMatch(m.round)} />)}
         </div>
+        {played.length > 0 && <p className="mt-2 text-[11px] text-[var(--t3)]">A repetição 2D fica disponível só para a última jornada.</p>}
       </Section>
     </div>
   );

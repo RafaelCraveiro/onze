@@ -23,8 +23,8 @@ export default function AuthView({ auth, actions }) {
   return (
     <div className="mx-auto flex min-h-screen max-w-lg flex-col items-center justify-center gap-6 p-6">
       <div className="text-center">
-        <h1 className="font-display text-7xl font-bold uppercase leading-none tracking-tight">
-          <span className="text-[var(--accent)]">On</span>ze
+        <h1 className="font-display text-6xl font-bold uppercase sm:text-7xl leading-none tracking-tight">
+          <span className="text-[var(--accent)]">Touch</span>line
         </h1>
         <p className="text-sm text-[var(--t3)]">manager de futebol online — uma conta, um clube único</p>
       </div>

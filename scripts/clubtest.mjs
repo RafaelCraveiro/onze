@@ -61,9 +61,10 @@ g = await club.tickClub(1, now);
 check("nível agora é 3", g.club.level === 3);
 
 const toSell = g.players[0];
-const sellOk = await club.sellPlayer(1, toSell.id, 5000, now);
+const toSellPrice = playerValue(toSell);
+const sellOk = await club.sellPlayer(1, toSell.id, toSellPrice, now);
 check("colocar à venda aceite", sellOk.ok);
-check("jogador marcado para venda", (await club.loadGame(1)).players.find((p) => p.id === toSell.id)?.selling === 5000);
+check("jogador marcado para venda", (await club.loadGame(1)).players.find((p) => p.id === toSell.id)?.selling === toSellPrice);
 await club.cancelSale(1, toSell.id, now);
 check("retirar da venda funciona", (await club.loadGame(1)).players.find((p) => p.id === toSell.id)?.selling === undefined);
 
@@ -131,10 +132,35 @@ check("renovação soma épocas", (await club.loadGame(1)).players.find((p) => p
 const payT = now + 2 * 24 * 60 * 60 * 1000 + 1000;
 const m0 = (await club.loadGame(1)).club.money;
 const paid = await club.tickClub(1, payT);
-check("salários são descontados com o tempo", paid.club.money < m0, `(${m0} → ${paid.club.money})`);
+const payNews = paid.inbox.find((n) => n.title === "Salários")?.text ?? "";
+const [, sponsorIn, wagesOut] = payNews.match(/Recebeste (\d+)€ de patrocínios e pagaste (\d+)€/) ?? [];
+check("patrocínios entram e salários saem", Number(sponsorIn) > 0 && Number(wagesOut) > 0 && paid.club.money === m0 + Number(sponsorIn) - Number(wagesOut), `(${m0} → ${paid.club.money}: ${payNews})`);
 await db.prepare("UPDATE club SET money = 0 WHERE user_id = 1").run();
 const broke = await club.tickClub(1, payT + 2 * 24 * 60 * 60 * 1000);
-check("sem dinheiro não cria dívida", broke.club.money === 0, `(${broke.club.money})`);
+check("sem dinheiro não cria dívida", broke.club.money >= 0, `(${broke.club.money})`);
+
+console.log("\n[5b] Treino de Elite");
+await db.prepare("INSERT INTO users (id, club_name, emblem) VALUES (9, 'Elite FC', ?)").run(EMB);
+const eT = Date.now();
+await club.tickClub(9, eT);
+const e0 = (await club.loadGame(9)).players[3];
+const eOvr = overallBase(e0);
+await db.prepare("UPDATE players SET age = 23, talent = ?, contract = 5 WHERE id = ?").run(eOvr, e0.id);
+check("recusa sem Centro de Treino 8", (await club.trainElite(9, e0.id, eT)).error === "elite-indisponivel");
+await db.prepare("UPDATE club SET bld_treino = 10, money = 900000 WHERE user_id = 9").run();
+const eOk = await club.trainElite(9, e0.id, eT + 1000);
+check("programa aceite", eOk.ok && eOk.cost > 0, JSON.stringify(eOk));
+let eG = await club.loadGame(9), eP = eG.players.find((p) => p.id === e0.id);
+check("potencial sobe 1", eP.pot === eOvr + 1 && eP.elite === 1, JSON.stringify({ pot: eP.pot, eOvr, elite: eP.elite }));
+check("dinheiro debitado", eG.club.money < 900000 && eG.club.money === 900000 - eOk.cost, String(eG.club.money));
+const eTeam = await club.buildXITeam(9, eT + 2000);
+check("não joga durante o programa", !eTeam.players.some((p) => p.id === e0.id) && !eTeam.bench.some((p) => p.id === e0.id));
+check("não dá para repetir ao mesmo tempo", (await club.trainElite(9, e0.id, eT + 3000)).error === "elite-indisponivel");
+await db.prepare("UPDATE club SET level = 5 WHERE user_id = 9").run();
+check("não se vende durante o programa", (await club.sellPlayer(9, e0.id, playerValue(eP), eT + 4000)).error === "jogador-em-treino");
+const eEnd = await club.tickClub(9, eT + 5 * 24 * 3600 * 1000 + 5000);
+check("volta a estar disponível ao fim de 5 dias", !eEnd.players.find((p) => p.id === e0.id).eliteUntil);
+check("preço fora da banda recusado", (await club.sellPlayer(9, e0.id, 50, eT + 5 * 24 * 3600 * 1000 + 6000)).error === "preco-fora-limites");
 
 console.log("\n[6] Calendário único de envelhecimento para todo o servidor");
 const { AGE_MS, nextAgeBoundary } = await server.ssrLoadModule("/src/engine/constants.js");
